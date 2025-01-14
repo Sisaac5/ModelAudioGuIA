@@ -1,0 +1,4 @@
+data/clips/*
+data/vocab/vocab.json
+models/*
+vocab/vocab.json
