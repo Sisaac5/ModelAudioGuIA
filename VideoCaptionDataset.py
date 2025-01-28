@@ -62,14 +62,14 @@ class VideoCaptionDataset(Dataset):
         selected_frames = frames[frame_indices]
         #Combinar frames em um tensor
         video_tensor = torch.tensor(selected_frames, dtype=torch.float32).unsqueeze(0)  # (num_frames, C, H, W)
-       
+           
         #Parar de retorna a média dos frames
-        video_tensor = torch.mean(video_tensor, dim=1)
+        #video_tensor = torch.mean(video_tensor, dim=1)
 
         # Processar a legenda
         caption = self.captions.iloc[idx]
         caption_vec = [self.vocab.stoi["<SOS>"]]
         caption_vec += self.vocab.numericalize(caption)
         caption_vec += [self.vocab.stoi["<EOS>"]]
-
-        return video_tensor, torch.tensor(caption_vec)
+        
+        return video_tensor[0], torch.tensor(caption_vec)
