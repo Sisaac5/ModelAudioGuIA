@@ -3,3 +3,6 @@ data/vocab/vocab.json
 models/*
 vocab/vocab.json
 __pycache__/*.pyc
+data/
+__pycache__/
+models/

@@ -126,7 +126,7 @@ class DecoderRNN(nn.Module):
         sample_max = opt.get('sample_max', 1)
         beam_size = opt.get('beam_size', 1)
         temperature = opt.get('temperature', 1.0)
-
+        max_length = len(targets[0]) - 1
         batch_size, _, _ = encoder_outputs.size()
         decoder_hidden = self._init_rnn_state(encoder_hidden)
 
@@ -136,7 +136,7 @@ class DecoderRNN(nn.Module):
         if mode == 'train':
             # use targets as rnn inputs
             targets_emb = self.embedding(targets)
-            for i in range(self.max_length - 1):
+            for i in range(max_length):
                 current_words = targets_emb[:, i, :]
                 hidden_state = decoder_hidden[0] if isinstance(decoder_hidden, tuple) else decoder_hidden
                 context = self.attention(hidden_state.squeeze(0), encoder_outputs)                
@@ -144,8 +144,7 @@ class DecoderRNN(nn.Module):
                 decoder_input = self.input_dropout(decoder_input).unsqueeze(1)
                 decoder_output, decoder_hidden = self.rnn(
                     decoder_input, decoder_hidden)
-                logprobs = F.log_softmax(
-                    self.out(decoder_output.squeeze(1)), dim=1)
+                logprobs = self.out(decoder_output.squeeze(1))
                 seq_logprobs.append(logprobs.unsqueeze(1))
 
             seq_logprobs = torch.cat(seq_logprobs, 1)
@@ -154,9 +153,9 @@ class DecoderRNN(nn.Module):
             if beam_size > 1:
                 return self.sample_beam(encoder_outputs, decoder_hidden, opt)
 
-            for t in range(self.max_length - 1):
+            for t in range(max_length):
                 context = self.attention(
-                    decoder_hidden.squeeze(0), encoder_outputs)
+                    decoder_hidden[0].squeeze(0), encoder_outputs)
 
                 if t == 0:  # input <bos>
                     it = torch.LongTensor([self.sos_id] * batch_size).cuda()
@@ -184,8 +183,7 @@ class DecoderRNN(nn.Module):
                 decoder_input = self.input_dropout(decoder_input).unsqueeze(1)
                 decoder_output, decoder_hidden = self.rnn(
                     decoder_input, decoder_hidden)
-                logprobs = F.log_softmax(
-                    self.out(decoder_output.squeeze(1)), dim=1)
+                logprobs = self.out(decoder_output.squeeze(1))
 
             seq_logprobs = torch.cat(seq_logprobs, 1)
             seq_preds = torch.cat(seq_preds[1:], 1)
