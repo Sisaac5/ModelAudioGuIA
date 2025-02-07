@@ -2,6 +2,8 @@ import os
 import torch
 from torch.utils.data import Dataset
 import numpy as np
+import clip
+from PIL import Image
 
 
 class VideoCaptionDataset(Dataset):
@@ -14,6 +16,7 @@ class VideoCaptionDataset(Dataset):
             vocab (obj): Vocabulário com métodos `stoi` e `numericalize`.
             transform (callable, optional): Transformações aplicadas aos frames.
             num_frames (int): Número de frames a serem carregados por vídeo.
+            device (str): Qual tipo de processamento será utilizado pelo CLIP.
         """
         self.root_dir = root_dir
         self.transform = transform
@@ -23,6 +26,8 @@ class VideoCaptionDataset(Dataset):
         self.vocab = vocab
         self.num_frames = num_frames
         
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.clip_model, self.clip_preprocess = clip.load("ViT-B/32", device=self.device)
 
     def __len__(self):
         return len(self.filter_df)
@@ -46,6 +51,13 @@ class VideoCaptionDataset(Dataset):
           return df[index_frame_start - 1:index_frame_end]
 
         return df[index_frame_start:index_frame_end]
+    
+    def process_frames(self, frames):
+        images = [Image.fromarray(frame) for frame in frames]
+        preprocessed_frames = torch.stack([self.clip_preprocess(img) for img in images]).to(self.device)
+        with torch.no_grad():
+            frame_features = self.clip_model.encode_image(preprocessed_frames)
+        return frame_features
 
     def __getitem__(self, idx):
 
@@ -54,22 +66,19 @@ class VideoCaptionDataset(Dataset):
         end = self.filter_df.iloc[idx]['end']
         frames = self.get_frames(video_name, start, end)
 
-        quant_frames = len(frames)
-
-        ##TODO: usar clip
+        ######################################################
+        ################## todo: usar clip ###################
         
         frame_indices = torch.linspace(0, len(frames) - 1, steps=self.num_frames).long()
         selected_frames = frames[frame_indices]
-        #Combinar frames em um tensor
-        video_tensor = torch.tensor(selected_frames, dtype=torch.float32).unsqueeze(0)  # (num_frames, C, H, W)
-           
-        #Parar de retorna a média dos frames
-        #video_tensor = torch.mean(video_tensor, dim=1)
-
+        
+        # Processar frames com CLIP
+        clip_embeddings = self.process_frames(selected_frames)
+        
         # Processar a legenda
         caption = self.captions.iloc[idx]
         caption_vec = [self.vocab.stoi["<SOS>"]]
         caption_vec += self.vocab.numericalize(caption)
         caption_vec += [self.vocab.stoi["<EOS>"]]
         
-        return video_tensor[0], torch.tensor(caption_vec)
+        return clip_embeddings, torch.tensor(caption_vec)
