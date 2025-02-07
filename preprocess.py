@@ -1,3 +1,25 @@
+import os
+import clip
+import numpy as np
+import pandas as pd
+
+from PIL import Image
+
+# Carregar os filmes
+data_path = './data'
+captions_csv = 'mad-v2-ad-unnamed.csv'
+npy_path = os.path.join(data_path, 'clips')
+
+df = pd.read_csv(os.path.join(data_path, captions_csv))
+df = df.loc[df['movie'].isin([int(file.split('.')[0]) for file in os.listdir(npy_path)])]
+
+# Salvar uma coluna nova 'movie_clip' e criar um csv novo
+df['movie_clip'] = df.apply(lambda row: f"{row['movie']}_{row.name}", axis=1)
+df.to_csv("./data/mad-v2-ad-unnamed-plus.csv", index=False)
+
+# Filtrar o CSV
+
+
 '''
 1) Saber os files que está em /clips
 
@@ -23,3 +45,21 @@
         break
     exit()
 '''
+
+def get_frames(movie, start, end):
+    movie_name = os.path.join(npy_path, f'{movie}.npy')
+
+    df = np.load(movie_name)
+    rows, cols = df.shape
+    index_frame_start = int(start // 0.2)
+    index_frame_end = int(end // 0.2)
+
+    if index_frame_start > rows:
+        new_quant_frames = index_frame_end - index_frame_start
+        index_frame_start = rows - new_quant_frames
+        index_frame_end = rows
+
+        return df[index_frame_start:index_frame_end]
+
+    elif index_frame_start == index_frame_end:
+        return df[index_frame_start - 1:index_frame_end]
