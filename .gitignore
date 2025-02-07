@@ -7,4 +7,4 @@ data/
 __pycache__/
 models/
 .venv
-CLIP/*
+CLIP/
