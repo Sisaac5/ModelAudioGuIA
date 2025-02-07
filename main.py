@@ -16,7 +16,7 @@ from rouge_score import rouge_scorer
 if __name__ == "__main__":
         
     data_path = './data'
-    captions_csv = 'mad-v2-ad-teste.csv' # troca pelo test se precisar
+    captions_csv = 'mad-v2-ad-unnamed.csv' # troca pelo test se precisar
     npy_path = os.path.join(data_path, 'clips')
 
     ###HYPERPARAMETERS
@@ -33,16 +33,17 @@ if __name__ == "__main__":
 
     # Load dataframes
     df = pd.read_csv(os.path.join(data_path, captions_csv))
-
+    df = df.loc[df['movie'].isin([int(file.split('.')[0]) for file in os.listdir(npy_path)])]
+    
     # Split data
     movies = df['movie'].unique()
-
+    
     np.random.seed(42)
     shuffled_movies = np.random.permutation(movies)
 
     n = len(shuffled_movies)
-    train_size = int(0.8 * n)
-    test_size = val_size = int(0.1 * n)
+    train_size = int(0.6 * n)
+    test_size = val_size = int(0.2 * n)
 
     train_movies = shuffled_movies[:train_size]
     test_movies = shuffled_movies[train_size:train_size + test_size]
@@ -109,7 +110,7 @@ if __name__ == "__main__":
         shuffle=False,
         collate_fn=CapsCollate(pad_idx=pad_idx, batch_first=True)
     )
-        
+    
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
     encoder = EncoderRNN(
