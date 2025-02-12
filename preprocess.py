@@ -46,6 +46,11 @@ for filme in tqdm(os.listdir(npy_path), desc="Processando filmes"):
     movie_id = int(filme.split('.')[0])
     movie_path = os.path.join(npy_path, filme)
     print(f"Processando filme: {movie_path}")
+    
+    # Criar subpasta para o filme
+    movie_output_path = os.path.join(npy_path, str(movie_id))
+    os.makedirs(movie_output_path, exist_ok=True)
+    
     filter_df = df.loc[df['movie'] == movie_id]
     
     for i, row in tqdm(filter_df.iterrows(), total=len(filter_df), desc=f"Processando {movie_id}"):
@@ -64,5 +69,6 @@ for filme in tqdm(os.listdir(npy_path), desc="Processando filmes"):
         best_frame_indices = np.argsort(frame_similarities.cpu().detach().numpy())[-10:]  # Seleciona os 10 melhores
         final_best_frames = frames[best_frame_indices]
         
-        # Salvar os melhores frames finais
-        np.save(os.path.join(npy_path, f"{row['movie_clip']}.npy"), final_best_frames)
+        # Salvar os melhores frames finais dentro da subpasta do filme
+        output_file = os.path.join(movie_output_path, f"{row['movie_clip']}.npy")
+        np.save(output_file, final_best_frames)
