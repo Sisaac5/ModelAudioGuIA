@@ -2,7 +2,8 @@ import os
 import clip
 import numpy as np
 import pandas as pd
-
+import torch
+from tqdm import tqdm
 from PIL import Image
 
 # Carregar os filmes
@@ -10,56 +11,57 @@ data_path = './data'
 captions_csv = 'mad-v2-ad-unnamed.csv'
 npy_path = os.path.join(data_path, 'clips')
 
+# Carregar dataset
 df = pd.read_csv(os.path.join(data_path, captions_csv))
 df = df.loc[df['movie'].isin([int(file.split('.')[0]) for file in os.listdir(npy_path)])]
 
-# Salvar uma coluna nova 'movie_clip' e criar um csv novo
+# Salvar uma coluna nova 'movie_clip' e criar um CSV novo
 df['movie_clip'] = df.apply(lambda row: f"{row['movie']}_{row.name}", axis=1)
 df.to_csv("./data/mad-v2-ad-unnamed-plus.csv", index=False)
 
-# Filtrar o CSV
-
-
-'''
-1) Saber os files que está em /clips
-
-2) Carregar o csv unnamed com os filmes
-
-2.5) df['movie_clip'] = df.apply(lambda row: f"{row['movies']}_{row.name}", axis=1)
-2.6) Salvar csv ( nome diferente )
-
-3) Percorrer os files em /clips ( for filme in os.listdir(data/clips))
-    4) Filtrar o csv unnamed ( df.loc[df['movies'] == filme] )
-    5) Percorrer cada linha do csv do passo 4 ( for i, row in filter_df.iterrows() )
-        6) Chamar get_frames(movie_name, row['start'], row['end'])
-        7) Passar pelo CLIP (10 frames)
-        8) Salvar a matriz resultante ( np.save(row['movie_clip'] + ".npy"), matriz_clip )
-        
-        
-        
-        
-    for batch in train_loader:
-        print(batch[0].shape)
-        print(batch[1].shape)
-        print(batch[1])
-        break
-    exit()
-'''
+# Carregar o modelo CLIP
+device = "cuda" if torch.cuda.is_available() else "cpu"
+model, preprocess = clip.load("ViT-B/32", device=device)
 
 def get_frames(movie, start, end):
     movie_name = os.path.join(npy_path, f'{movie}.npy')
-
-    df = np.load(movie_name)
+    df = np.load(movie_name, mmap_mode='r')
     rows, cols = df.shape
     index_frame_start = int(start // 0.2)
     index_frame_end = int(end // 0.2)
-
+    
     if index_frame_start > rows:
         new_quant_frames = index_frame_end - index_frame_start
         index_frame_start = rows - new_quant_frames
         index_frame_end = rows
-
         return df[index_frame_start:index_frame_end]
-
+    
     elif index_frame_start == index_frame_end:
         return df[index_frame_start - 1:index_frame_end]
+    
+    return df[index_frame_start:index_frame_end]
+
+# Percorrer os arquivos de vídeos na pasta clips
+for filme in tqdm(os.listdir(npy_path), desc="Processando filmes"):
+    movie_id = int(filme.split('.')[0])
+    movie_path = os.path.join(npy_path, filme)
+    print(f"Processando filme: {movie_path}")
+    filter_df = df.loc[df['movie'] == movie_id]
+    
+    for i, row in tqdm(filter_df.iterrows(), total=len(filter_df), desc=f"Processando {movie_id}"):
+        frames = get_frames(movie_id, row['start'], row['end'])
+        
+        if frames.size == 0:
+            continue
+        
+        # Obter embeddings do texto
+        text_embedding = model.encode_text(clip.tokenize([row['test']]).to(device))
+        
+        # Comparar embeddings dos frames com o texto
+        frame_tensors = torch.from_numpy(frames).to(device)
+        frame_similarities = (frame_tensors @ text_embedding.T).squeeze(1)
+        best_frame_indices = np.argsort(frame_similarities.cpu().numpy())[-10:]  # Seleciona os 10 melhores
+        final_best_frames = frames[best_frame_indices]
+        
+        # Salvar os melhores frames finais
+        np.save(os.path.join(npy_path, f"{row['movie_clip']}_best.npy"), final_best_frames)
