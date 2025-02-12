@@ -55,13 +55,14 @@ for filme in tqdm(os.listdir(npy_path), desc="Processando filmes"):
             continue
         
         # Obter embeddings do texto
-        text_embedding = model.encode_text(clip.tokenize([row['test']]).to(device))
+        text_embedding = model.encode_text(clip.tokenize([row['text']], truncate=True).to(device))
         
         # Comparar embeddings dos frames com o texto
         frame_tensors = torch.from_numpy(frames).to(device)
+        frame_tensors = frame_tensors.to(torch.float16)
         frame_similarities = (frame_tensors @ text_embedding.T).squeeze(1)
-        best_frame_indices = np.argsort(frame_similarities.cpu().numpy())[-10:]  # Seleciona os 10 melhores
+        best_frame_indices = np.argsort(frame_similarities.cpu().detach().numpy())[-10:]  # Seleciona os 10 melhores
         final_best_frames = frames[best_frame_indices]
         
         # Salvar os melhores frames finais
-        np.save(os.path.join(npy_path, f"{row['movie_clip']}_best.npy"), final_best_frames)
+        np.save(os.path.join(npy_path, f"{row['movie_clip']}.npy"), final_best_frames)
