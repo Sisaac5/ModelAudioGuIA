@@ -125,7 +125,7 @@ class DecoderRNN(nn.Module):
         """
         sample_max = opt.get('sample_max', 1)
         beam_size = opt.get('beam_size', 1)
-        temperature = opt.get('temperature', 1.0)
+        temperature = opt.get('temperature', 2.0)
         max_length = len(targets[0]) - 1
         batch_size, _, _ = encoder_outputs.size()
         decoder_hidden = self._init_rnn_state(encoder_hidden)
@@ -177,7 +177,9 @@ class DecoderRNN(nn.Module):
                     it = it.view(-1).long()
 
                 seq_preds.append(it.view(-1, 1))
-
+                # se gerar final de frase, para de gerar
+                if (seq_preds[t] == self.eos_id):
+                    break
                 xt = self.embedding(it)
                 decoder_input = torch.cat([xt, context], dim=1)
                 decoder_input = self.input_dropout(decoder_input).unsqueeze(1)

@@ -10,13 +10,13 @@ import pandas as pd
 from vocabulary import Vocabulary
 from torchvision import transforms as T
 from rouge_score import rouge_scorer
-
+import json
 
 
 if __name__ == "__main__":
         
     data_path = './data'
-    captions_csv = 'mad-v2-ad-teste.csv' # troca pelo test se precisar
+    captions_csv = 'mad-v2-ad-unnamed-plus.csv' # troca pelo test se precisar
     npy_path = os.path.join(data_path, 'clips')
 
     ###HYPERPARAMETERS
@@ -26,9 +26,9 @@ if __name__ == "__main__":
     ENCODER_DIM = 512
     DECODER_DIM = 512
     TEMPORAL_DIM = 512
-    NUM_LAYERS = 2
+    NUM_LAYERS = 5
     LEARNING_RATE = 1e-3
-    NUM_EPOCHS = 1
+    NUM_EPOCHS = 35
     NUM_FRAMES = 10
 
     # Load dataframes
@@ -37,11 +37,11 @@ if __name__ == "__main__":
     # Split data
     movies = df['movie'].unique()
 
-    np.random.seed(42)
+    np.random.seed(42+42)
     shuffled_movies = np.random.permutation(movies)
 
     n = len(shuffled_movies)
-    train_size = int(0.8 * n)
+    train_size = int(0.9 * n)
     test_size = val_size = int(0.1 * n)
 
     train_movies = shuffled_movies[:train_size]
@@ -110,6 +110,7 @@ if __name__ == "__main__":
         collate_fn=CapsCollate(pad_idx=pad_idx, batch_first=True)
     )
         
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
     encoder = EncoderRNN(
@@ -136,7 +137,7 @@ if __name__ == "__main__":
 
     optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
     criterion = torch.nn.CrossEntropyLoss(ignore_index=pad_idx)
-
+    test_saved = {}
     for epoch in range(NUM_EPOCHS):
         model.train()
         total_loss = 0
@@ -169,7 +170,7 @@ if __name__ == "__main__":
 
         pred_vec, pred_vec_text, alp = [], [], []
         test_loader_tqdm = tqdm(test_loader, total=len(test_loader), desc=f"Epoch {epoch} - Validation")
-        
+        tuples=[]
         with torch.no_grad():
             for images, captions in test_loader_tqdm:
                 images, captions = images.to(device), captions.to(device)
@@ -192,12 +193,15 @@ if __name__ == "__main__":
                       vocab.itos[token.item()]
                       for token in captions[i] if token.item() in vocab.itos
                   ])
-
+                  tuples.append((gt_caption_text, predicted_caption_text))
                   rouge_score = scorer.score(gt_caption_text, predicted_caption_text)
                   all_rouge_scores.append(rouge_score)
                   pred_vec.append(predicted_caption)
                   pred_vec_text.append(predicted_caption_text)
-            
+        test_saved[f"epoch_{epoch}"] = tuples
+        with open(os.path.join(epoch_dir, "predictions.json"), "w") as f:
+            json.dump(test_saved, f, indent=4)
+
         avg_rouge = {
             "rouge1": np.mean([score["rouge1"].fmeasure for score in all_rouge_scores]),
             "rouge2": np.mean([score["rouge2"].fmeasure for score in all_rouge_scores]),

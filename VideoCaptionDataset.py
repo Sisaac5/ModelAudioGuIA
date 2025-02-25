@@ -19,7 +19,7 @@ class VideoCaptionDataset(Dataset):
         self.transform = transform
         self.filter_df = df[df['movie'].isin(movies)]
 
-        self.captions = self.filter_df["text"].reset_index(drop=True)
+        self.captions = self.filter_df["text_unnamed"].reset_index(drop=True)
         self.vocab = vocab
         self.num_frames = num_frames
         
@@ -27,49 +27,27 @@ class VideoCaptionDataset(Dataset):
     def __len__(self):
         return len(self.filter_df)
 
-    def get_frames(self, movie, start, end):
-        movie_name = os.path.join(self.root_dir, f'{movie}.npy')
-
-        df = np.load(movie_name)
-        rows, cols = df.shape
-        index_frame_start = int(start // 0.2)
-        index_frame_end = int(end // 0.2)
-
-        if index_frame_start > rows:
-          new_quant_frames = index_frame_end - index_frame_start
-          index_frame_start = rows - new_quant_frames
-          index_frame_end = rows
-
-          return df[index_frame_start:index_frame_end]
-
-        elif index_frame_start == index_frame_end:
-          return df[index_frame_start - 1:index_frame_end]
-
-        return df[index_frame_start:index_frame_end]
-
     def __getitem__(self, idx):
 
-        video_name = self.filter_df.iloc[idx]['movie']
-        start = self.filter_df.iloc[idx]['start']
-        end = self.filter_df.iloc[idx]['end']
-        frames = self.get_frames(video_name, start, end)
+        path_movie_clips = self.filter_df.iloc[idx]['movie_clip']
+        movie_id = str(self.filter_df.iloc[idx]['movie'])
+        frames = np.load(os.path.join(self.root_dir, movie_id,path_movie_clips+".npy"))
 
-        quant_frames = len(frames)
-
-        ##TODO: usar clip
-        
-        frame_indices = torch.linspace(0, len(frames) - 1, steps=self.num_frames).long()
-        selected_frames = frames[frame_indices]
-        #Combinar frames em um tensor
+        if(len(frames)==self.num_frames):
+            selected_frames = frames
+        elif(len(frames)<self.num_frames):
+            selected_frames = np.zeros((self.num_frames, *frames.shape[1:]))
+            selected_frames[:len(frames)] = frames
+        else:
+            selected_frames = frames[self.df['frames_escolhidos'].iloc[idx][:self.num_frames]]
+              
         video_tensor = torch.tensor(selected_frames, dtype=torch.float32).unsqueeze(0)  # (num_frames, C, H, W)
-           
-        #Parar de retorna a média dos frames
-        #video_tensor = torch.mean(video_tensor, dim=1)
 
         # Processar a legenda
         caption = self.captions.iloc[idx]
         caption_vec = [self.vocab.stoi["<SOS>"]]
         caption_vec += self.vocab.numericalize(caption)
-        caption_vec += [self.vocab.stoi["<EOS>"]]
-        
+        # caption_vec += [self.vocab.stoi["<EOS>"]]
+     
+
         return video_tensor[0], torch.tensor(caption_vec)
