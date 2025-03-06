@@ -75,10 +75,10 @@ import torch
 import torch.nn as nn
 
 class DecoderRNN(nn.Module):
-    def __init__(self, embed_size, hidden_size, vocab_size, num_layers=1):
+    def __init__(self, embed_size, hidden_size, vocab_size, num_layers=1, rnn_dropout_p=0.5):
         super(DecoderRNN, self).__init__()
         self.embed = nn.Embedding(vocab_size, embed_size)
-        self.rnn = nn.GRU(embed_size, hidden_size, num_layers, batch_first=True)
+        self.rnn = nn.GRU(embed_size, hidden_size, num_layers, batch_first=True, dropout= rnn_dropout_p)
         self.linear = nn.Linear(hidden_size, vocab_size)
         self.vocab_size = vocab_size
 
