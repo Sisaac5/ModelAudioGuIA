@@ -13,7 +13,7 @@ import torch.optim as optim
 import torch.nn as nn
 from sklearn.model_selection import train_test_split
 from transformers import BertTokenizer
-
+from torchsummary import summary
 
 if __name__ == "__main__":
         
@@ -116,6 +116,9 @@ if __name__ == "__main__":
     model = VideoCaptioningModel(encoder, 
                                  decoder
                                  ).to(device)
+    
+    summary(model, (32, 10, 512))
+    
     optimizer = optim.Adam(model.parameters(),
                             lr=LEARNING_RATE)
     
@@ -161,7 +164,7 @@ if __name__ == "__main__":
             for i in range(predicted_captions.size(0)):
                 predicted_caption = tokenizer.decode(predicted_captions[i], skip_special_tokens=True)
                 results.append({
-                    "video_id": test_dataset.filter_df.iloc[i]['movie_clip'],
+                    "video_id": test_dataset.df.iloc[i]['movie_clip'],
                     "predicted_caption": predicted_caption,
                     "true_caption": tokenizer.decode(captions[i], skip_special_tokens=True)
                 })
