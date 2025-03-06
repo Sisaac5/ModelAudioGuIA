@@ -180,7 +180,7 @@ if __name__ == "__main__":
             print(f'Epoch [{epoch+1}/{NUM_EPOCHS}], Test Loss: {test_loss:.4f}')    
         if test_loss < best_val_loss:
             best_val_loss = test_loss
-            torch.save(model.state_dict(), os.path.join(data_path, 'best_model.pth'))
+            torch.save(model.state_dict(), os.path.join("/home/arthur/tail/AudioGuIA/ModelAudioGuIA/models/best", 'best_model.pth'))
             print("Model saved! Epoch: ", epoch)
 
         # Save results to a CSV file
