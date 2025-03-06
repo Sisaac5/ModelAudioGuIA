@@ -5,7 +5,7 @@ import numpy as np
 
 
 class VideoCaptionDataset(Dataset):
-    def __init__(self, root_dir, df, vocab, transform=None, num_frames=10):
+    def __init__(self, root_dir, df, tokenizer ,transform=None, num_frames=10, max_lenght=20):
         """
         Dataset para Video Captioning.
         Args:
@@ -19,9 +19,9 @@ class VideoCaptionDataset(Dataset):
         self.transform = transform
         self.df = df
         self.captions = self.df["text_unnamed"].reset_index(drop=True)
-        self.vocab = vocab
+        self.tokenizer = tokenizer
         self.num_frames = num_frames
-        
+        self.max_length = max_lenght
 
     def __len__(self):
         return len(self.df)
@@ -44,9 +44,14 @@ class VideoCaptionDataset(Dataset):
 
         # Processar a legenda
         caption = self.captions.iloc[idx]
-        caption_vec = [self.vocab.stoi["<SOS>"]]
-        caption_vec += self.vocab.numericalize(caption)
-        caption_vec += [self.vocab.stoi["<EOS>"]]
+        caption_tokens = self.tokenizer.encode_plus(
+            caption,
+            add_special_tokens=True,
+            max_length=self.max_length,
+            padding='max_length',
+            truncation=True,
+            return_tensors='pt'
+        )
      
 
-        return video_tensor[0], torch.tensor(caption_vec)
+        return video_tensor[0], caption_tokens['input_ids'].squeeze(0)

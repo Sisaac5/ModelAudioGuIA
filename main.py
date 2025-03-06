@@ -12,7 +12,7 @@ from torchvision import transforms as T
 import torch.optim as optim
 import torch.nn as nn
 from sklearn.model_selection import train_test_split
-
+from transformers import BertTokenizer
 
 
 if __name__ == "__main__":
@@ -31,24 +31,26 @@ if __name__ == "__main__":
     DROPOUT = 0.1
     LEARNING_RATE = 1e-4
     NUM_EPOCHS = 10
+    MAX_LENGTH = 20
     ###
 
     # Load dataframes
     df = pd.read_csv(os.path.join(data_path, captions_csv))
 
-  # Dividir entre treino e temp (validação + teste)
+    # Dividir entre treino e temp (validação + teste)
     df_train, df_temp = train_test_split(df, test_size=0.2, random_state=42, shuffle=True)
 
-  # Dividir temp entre validação e teste
+    # Dividir temp entre validação e teste
     df_val, df_test = train_test_split(df_temp, test_size=0.5, random_state=42, shuffle=True)
 
-  # Obter as legendas
+    # Obter as legendas
     captions_train = df_train['text'].tolist()
-      # Create a vocabulary
-    vocab = Vocabulary(freq_threshold=1)
-    vocab.build_vocab(captions_train)
-    os.makedirs(os.path.join(data_path, 'vocab'), exist_ok=True)
-    vocab.save_vocab(path=os.path.join(data_path,'vocab','vocab.json'))
+    # Create a vocabulary
+    tokenizer = BertTokenizer.from_pretrained('bert-base-cased')
+    # vocab = Vocabulary(freq_threshold=1)
+    # vocab.build_vocab(captions_train)
+    # os.makedirs(os.path.join(data_path, 'vocab'), exist_ok=True)
+    # vocab.save_vocab(path=os.path.join(data_path,'vocab','vocab.json'))
 
     # # Load vocabulary
     # vocab = Vocabulary.load_vocab(os.path.join(data_path,'vocab','vocab.json'))
@@ -60,31 +62,28 @@ if __name__ == "__main__":
     # Create datasets
     train_dataset = VideoCaptionDataset(npy_path, 
                                         df_train,
-                                        vocab,
+                                        tokenizer,
                                         transform=transforms,
                                         num_frames=NUM_FRAMES
                                         )
     test_dataset = VideoCaptionDataset(npy_path,
                                     df_test,
-                                    vocab, 
+                                    tokenizer, 
                                     transform=transforms,
                                         num_frames=NUM_FRAMES
                                     )
     val_dataset = VideoCaptionDataset(npy_path, 
                                     df_val,                                     
-                                    vocab,
+                                    tokenizer,
                                     transform=transforms,
                                         num_frames=NUM_FRAMES
                                     )
-
-    pad_idx = vocab.stoi["<PAD>"]
 
     train_loader = DataLoader(
         dataset=train_dataset,
         batch_size=BATCH_SIZE,
         num_workers=4,
         shuffle=True,
-        collate_fn=custom_collate_fn
     )
 
     test_loader = DataLoader(
@@ -92,7 +91,6 @@ if __name__ == "__main__":
         batch_size=BATCH_SIZE,
         num_workers=4,
         shuffle=False,
-        collate_fn=custom_collate_fn
     )
     
     val_loader = DataLoader(
@@ -100,10 +98,9 @@ if __name__ == "__main__":
         batch_size=BATCH_SIZE,
         num_workers=4,
         shuffle=False,
-        collate_fn=custom_collate_fn
     )
     
-    vocab_size = len(vocab)
+    vocab_size = tokenizer.vocab_size
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -122,60 +119,54 @@ if __name__ == "__main__":
     optimizer = optim.Adam(model.parameters(),
                             lr=LEARNING_RATE)
     
-    criterion = nn.CrossEntropyLoss(ignore_index=vocab.stoi["<PAD>"])
+    criterion = nn.CrossEntropyLoss(ignore_index=tokenizer.pad_token_id)
 
-# Training loop
-for epoch in range(NUM_EPOCHS):
-    model.train()
-    for frames, captions in tqdm(train_loader):
-        optimizer.zero_grad()
-        frames = frames.to(device)
-        captions = captions.to(device)
+    # Training loop
+    for epoch in range(NUM_EPOCHS):
+        model.train()
+        for frames, captions in tqdm(train_loader):
+            optimizer.zero_grad()
+            frames = frames.to(device)
+            captions = captions.to(device)
+            
+            # Forward pass
+            outputs = model(frames, captions[:, :-1])
+            
+            # Compute loss
+            loss = criterion(outputs.view(-1, vocab_size), captions[:, 1:].reshape(-1))
+            
+            # Backward pass and optimize
+            loss.backward()
+            optimizer.step()
         
-        # Forward pass
-        outputs = model(frames, captions[:, :-1])
-        
-        # Compute loss
-        loss = criterion(outputs.view(-1, vocab_size), captions[:, 1:].reshape(-1))
-        
-        # Backward pass and optimize
-        loss.backward()
-        optimizer.step()
-    
-    print(f'Epoch [{epoch+1}/{NUM_EPOCHS}], Loss: {loss.item():.4f}')
+        print(f'Epoch [{epoch+1}/{NUM_EPOCHS}], Loss: {loss.item():.4f}')
 
-# Test loop
-model.eval()
-results = []
+    # Test loop
+    model.eval()
+    results = []
 
-with torch.no_grad():
-    for frames, captions in tqdm(test_loader):
-        frames = frames.to(device)
-        captions = captions.to(device)
-        
-        # Get hidden state from the encoder
-        _, hidden = model.encoder(frames)
-        
-        # Generate captions using the decoder
-        start_token_idx = vocab.stoi["<SOS>"]
-        predicted_captions = model.decoder.inference(hidden, max_len=20, start_token_idx=start_token_idx, device=device)
-        
-        # Convert token indices to words
-        for i in range(predicted_captions.size(0)):
-            predicted_caption = []
-            for idx in predicted_captions[i]:
-                word = vocab.itos[idx.item()]
-                if word == "<EOS>":
-                    break
-                predicted_caption.append(word)
-            predicted_caption = " ".join(predicted_caption)
-            results.append({
-                "video_id": test_dataset.filter_df.iloc[i]['movie_clip'],
-                "predicted_caption": predicted_caption,
-                "true_caption": " ".join([vocab.itos[idx.item()] for idx in captions[i] if idx != vocab.stoi["<PAD>"]])
-            })
+    with torch.no_grad():
+        for frames, captions in tqdm(test_loader):
+            frames = frames.to(device)
+            captions = captions.to(device)
+            
+            # Get hidden state from the encoder
+            _, hidden = model.encoder(frames)
+            
+            # Generate captions using the decoder
+            start_token_idx = tokenizer.cls_token_id
+            predicted_captions = model.decoder.inference(hidden, max_len=20, start_token_idx=start_token_idx, device=device)
+            
+            # Convert token indices to words
+            for i in range(predicted_captions.size(0)):
+                predicted_caption = tokenizer.decode(predicted_captions[i], skip_special_tokens=True)
+                results.append({
+                    "video_id": test_dataset.filter_df.iloc[i]['movie_clip'],
+                    "predicted_caption": predicted_caption,
+                    "true_caption": tokenizer.decode(captions[i], skip_special_tokens=True)
+                })
 
-# Save results to a CSV file
-results_df = pd.DataFrame(results)
-results_df.to_csv(os.path.join(data_path, 'test_results.csv'), index=False)
-print("Test results saved to test_results.csv")
+    # Save results to a CSV file
+    results_df = pd.DataFrame(results)
+    results_df.to_csv(os.path.join(data_path, 'test_results.csv'), index=False)
+    print("Test results saved to test_results.csv")
