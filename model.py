@@ -1,220 +1,19 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-import random
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
 
-class Attention(nn.Module):
-    """
-    Applies an attention mechanism on the output features from the decoder.
-    """
+class VideoCaptioningModel(nn.Module):
+    def __init__(self, encoder, decoder):
+        super(VideoCaptioningModel, self).__init__()
+        self.encoder = encoder
+        self.decoder = decoder
 
-    def __init__(self, dim):
-        super(Attention, self).__init__()
-        self.dim = dim
-        self.linear1 = nn.Linear(dim * 2, dim)
-        self.linear2 = nn.Linear(dim, 1, bias=False)
-        #self._init_hidden()
-
-    def _init_hidden(self):
-        nn.init.xavier_normal_(self.linear1.weight)
-        nn.init.xavier_normal_(self.linear2.weight)
-
-    def forward(self, hidden_state, encoder_outputs):
-      """
-      Arguments:
-          hidden_state {Variable} -- batch_size x dim
-          encoder_outputs {Variable} -- batch_size x seq_len x dim
-      Returns:
-          Variable -- context vector of size batch_size x dim
-      """
-      batch_size, seq_len, _ = encoder_outputs.size()
-
-      # Se hidden_state tem 3 dimensões, reduza para 2 dimensões
-      if hidden_state.dim() == 3:
-          # Exemplo: Se (num_layers * num_directions, batch_size, hidden_dim)
-          # Use apenas a última camada (ou combine camadas se necessário)
-          hidden_state = hidden_state[-1]  # Seleciona a última camada
-          # Resultado: (batch_size, hidden_dim)
-
-      assert hidden_state.dim() == 2, f"Expected hidden_state to have 2 dimensions, got {hidden_state.dim()}"
-
-      # Adicione a dimensão para seq_len e repita
-      hidden_state = hidden_state.unsqueeze(1).repeat(1, seq_len, 1)
-      inputs = torch.cat((encoder_outputs, hidden_state), 2).view(-1, self.dim * 2)
-
-      o = self.linear2(F.tanh(self.linear1(inputs)))
-      e = o.view(batch_size, seq_len)
-      alpha = F.softmax(e, dim=1)
-      context = torch.bmm(alpha.unsqueeze(1), encoder_outputs).squeeze(1)
-      return context
-
-    
-class DecoderRNN(nn.Module):
-    """
-    Provides functionality for decoding in a seq2seq framework, with an option for attention.
-    Args:
-        vocab_size (int): size of the vocabulary
-        max_len (int): a maximum allowed length for the sequence to be processed
-        dim_hidden (int): the number of features in the hidden state `h`
-        n_layers (int, optional): number of recurrent layers (default: 1)
-        rnn_cell (str, optional): type of RNN cell (default: gru)
-        bidirectional (bool, optional): if the encoder is bidirectional (default False)
-        input_dropout_p (float, optional): dropout probability for the input sequence (default: 0)
-        rnn_dropout_p (float, optional): dropout probability for the output sequence (default: 0)
-
-    """
-
-    def __init__(self,
-                 vocab_size,
-                 max_len,
-                 dim_hidden,
-                 dim_word,
-                 n_layers=1,
-                 rnn_cell='gru',
-                 bidirectional=False,
-                 input_dropout_p=0.1,
-                 rnn_dropout_p=0.1):
-        super(DecoderRNN, self).__init__()
-
-        self.bidirectional_encoder = bidirectional
-
-        self.dim_output = vocab_size
-        self.dim_hidden = dim_hidden * 2 if bidirectional else dim_hidden
-        self.dim_word = dim_word
-        self.max_length = max_len
-        self.sos_id = 1
-        self.eos_id = 0
-        self.input_dropout = nn.Dropout(input_dropout_p)
-        self.embedding = nn.Embedding(self.dim_output, dim_word)
-        self.attention = Attention(self.dim_hidden)
-        if rnn_cell.lower() == 'lstm':
-            self.rnn_cell = nn.LSTM
-        elif rnn_cell.lower() == 'gru':
-            self.rnn_cell = nn.GRU
-        self.rnn = self.rnn_cell(
-            self.dim_hidden + dim_word,
-            self.dim_hidden,
-            n_layers,
-            batch_first=True,
-            dropout=rnn_dropout_p)
-
-        self.out = nn.Linear(self.dim_hidden, self.dim_output)
-
-        self._init_weights()
-
-    def forward(self,
-                encoder_outputs,
-                encoder_hidden,
-                targets=None,
-                mode='train',
-                opt={}):
-        """
-
-        Inputs: inputs, encoder_hidden, encoder_outputs, function, teacher_forcing_ratio
-        - **encoder_hidden** (num_layers * num_directions, batch_size, dim_hidden): tensor containing the features in the
-          hidden state `h` of encoder. Used as the initial hidden state of the decoder. (default `None`)
-        - **encoder_outputs** (batch, seq_len, dim_hidden * num_directions): (default is `None`).
-        - **targets** (batch, max_length): targets labels of the ground truth sentences
-
-        Outputs: seq_probs,
-        - **seq_logprobs** (batch_size, max_length, vocab_size): tensors containing the outputs of the decoding function.
-        - **seq_preds** (batch_size, max_length): predicted symbols
-        """
-        sample_max = opt.get('sample_max', 1)
-        beam_size = opt.get('beam_size', 1)
-        temperature = opt.get('temperature', 2.0)
-        max_length = len(targets[0]) - 1
-        batch_size, _, _ = encoder_outputs.size()
-        decoder_hidden = self._init_rnn_state(encoder_hidden)
-
-        seq_logprobs = []
-        seq_preds = []
-        self.rnn.flatten_parameters()
-        if mode == 'train':
-            # use targets as rnn inputs
-            targets_emb = self.embedding(targets)
-            for i in range(max_length):
-                current_words = targets_emb[:, i, :]
-                hidden_state = decoder_hidden[0] if isinstance(decoder_hidden, tuple) else decoder_hidden
-                context = self.attention(hidden_state.squeeze(0), encoder_outputs)                
-                decoder_input = torch.cat([current_words, context], dim=1)
-                decoder_input = self.input_dropout(decoder_input).unsqueeze(1)
-                decoder_output, decoder_hidden = self.rnn(
-                    decoder_input, decoder_hidden)
-                logprobs = self.out(decoder_output.squeeze(1))
-                seq_logprobs.append(logprobs.unsqueeze(1))
-
-            seq_logprobs = torch.cat(seq_logprobs, 1)
-
-        elif mode == 'inference':
-            if beam_size > 1:
-                return self.sample_beam(encoder_outputs, decoder_hidden, opt)
-
-            for t in range(max_length):
-                context = self.attention(
-                    decoder_hidden[0].squeeze(0), encoder_outputs)
-
-                if t == 0:  # input <bos>
-                    it = torch.LongTensor([self.sos_id] * batch_size).cuda()
-                elif sample_max:
-                    sampleLogprobs, it = torch.max(logprobs, 1)
-                    seq_logprobs.append(sampleLogprobs.view(-1, 1))
-                    it = it.view(-1).long()
-
-                else:
-                    # sample according to distribuition
-                    if temperature == 1.0:
-                        prob_prev = torch.exp(logprobs)
-                    else:
-                        # scale logprobs by temperature
-                        prob_prev = torch.exp(torch.div(logprobs, temperature))
-                    it = torch.multinomial(prob_prev, 1).cuda()
-                    sampleLogprobs = logprobs.gather(1, it)
-                    seq_logprobs.append(sampleLogprobs.view(-1, 1))
-                    it = it.view(-1).long()
-
-                seq_preds.append(it.view(-1, 1))
-                # se gerar final de frase, para de gerar
-                if (seq_preds[t] == self.eos_id):
-                    break
-                xt = self.embedding(it)
-                decoder_input = torch.cat([xt, context], dim=1)
-                decoder_input = self.input_dropout(decoder_input).unsqueeze(1)
-                decoder_output, decoder_hidden = self.rnn(
-                    decoder_input, decoder_hidden)
-                logprobs = self.out(decoder_output.squeeze(1))
-
-            seq_logprobs = torch.cat(seq_logprobs, 1)
-            seq_preds = torch.cat(seq_preds[1:], 1)
-
-        return seq_logprobs, seq_preds
-
-    def _init_weights(self):
-        """ init the weight of some layers
-        """
-        nn.init.xavier_normal_(self.out.weight)
-
-    def _init_rnn_state(self, encoder_hidden):
-        """ Initialize the encoder hidden state. """
-        if encoder_hidden is None:
-            return None
-        if isinstance(encoder_hidden, tuple):
-            encoder_hidden = tuple(
-                [self._cat_directions(h) for h in encoder_hidden])
-        else:
-            encoder_hidden = self._cat_directions(encoder_hidden)
-        return encoder_hidden
-
-    def _cat_directions(self, h):
-        """ If the encoder is bidirectional, do the following transformation.
-            (#directions * #layers, #batch, dim_hidden) -> (#layers, #batch, #directions * dim_hidden)
-        """
-        if self.bidirectional_encoder:
-            h = torch.cat([h[0:h.size(0):2], h[1:h.size(0):2]], 2)
-        return h
+    def forward(self, vid_feats, captions):
+        # Encode video features
+        encoder_output, hidden = self.encoder(vid_feats)
+        
+        # Decode captions
+        outputs = self.decoder(captions, hidden)
+        return outputs
 
 class EncoderRNN(nn.Module):
     def __init__(self, dim_vid, dim_hidden, input_dropout_p=0.2, rnn_dropout_p=0.5,
@@ -272,30 +71,72 @@ class EncoderRNN(nn.Module):
         output, hidden = self.rnn(vid_feats)
         return output, hidden
 
-class S2VTAttModel(nn.Module):
-    def __init__(self, encoder, decoder):
-        """
+import torch
+import torch.nn as nn
 
+class DecoderRNN(nn.Module):
+    def __init__(self, embed_size, hidden_size, vocab_size, num_layers=1):
+        super(DecoderRNN, self).__init__()
+        self.embed = nn.Embedding(vocab_size, embed_size)
+        self.rnn = nn.GRU(embed_size, hidden_size, num_layers, batch_first=True)
+        self.linear = nn.Linear(hidden_size, vocab_size)
+        self.vocab_size = vocab_size
+
+    def forward(self, captions, hidden):
+        """
+        Forward pass for training.
         Args:
-            encoder (nn.Module): Encoder rnn
-            decoder (nn.Module): Decoder rnn
-        """
-        super(S2VTAttModel, self).__init__()
-        self.encoder = encoder
-        self.decoder = decoder
-
-    def forward(self, vid_feats, target_variable=None,
-                mode='train', opt={}):
-        """
-
-        Args:
-            vid_feats (Variable): video feats of shape [batch_size, seq_len, dim_vid]
-            target_variable (None, optional): groung truth labels
-
+            captions: Ground truth captions of shape (batch_size, caption_length).
+            hidden: Initial hidden state from the encoder of shape (num_layers, batch_size, hidden_size).
         Returns:
-            seq_prob: Variable of shape [batch_size, max_len-1, vocab_size]
-            seq_preds: [] or Variable of shape [batch_size, max_len-1]
+            outputs: Predicted word scores of shape (batch_size, caption_length, vocab_size).
         """
-        encoder_outputs, encoder_hidden = self.encoder(vid_feats)
-        seq_prob, seq_preds = self.decoder(encoder_outputs, encoder_hidden, target_variable, mode, opt)
-        return seq_prob, seq_preds
+        # Embed captions
+        embeddings = self.embed(captions)  # (batch_size, caption_length, embed_size)
+        
+        # Pass through RNN
+        rnn_out, hidden = self.rnn(embeddings, hidden)  # rnn_out: (batch_size, caption_length, hidden_size)
+        
+        # Predict next word
+        outputs = self.linear(rnn_out)  # (batch_size, caption_length, vocab_size)
+        return outputs
+
+    def inference(self, hidden, max_len=20, start_token_idx=None, device=None):
+        """
+        Inference mode: Generate captions token-by-token.
+        Args:
+            hidden: Initial hidden state from the encoder of shape (num_layers, batch_size, hidden_size).
+            max_len: Maximum length of the generated caption.
+            start_token_idx: Index of the <SOS> token.
+            device: Device to use (e.g., 'cuda' or 'cpu').
+        Returns:
+            captions: Generated captions of shape (batch_size, max_len).
+        """
+        batch_size = hidden.size(1)
+        
+        # Initialize the first input token as <SOS>
+        inputs = torch.full((batch_size, 1), start_token_idx, dtype=torch.long).to(device)  # (batch_size, 1)
+        
+        # Store the generated captions
+        captions = torch.zeros((batch_size, max_len), dtype=torch.long).to(device)
+        
+        for t in range(max_len):
+            # Embed the input token
+            embeddings = self.embed(inputs)  # (batch_size, 1, embed_size)
+            
+            # Pass through RNN
+            rnn_out, hidden = self.rnn(embeddings, hidden)  # rnn_out: (batch_size, 1, hidden_size)
+            
+            # Predict the next word
+            outputs = self.linear(rnn_out.squeeze(1))  # (batch_size, vocab_size)
+            
+            # Get the most likely next token
+            _, next_token = torch.max(outputs, dim=1)  # (batch_size)
+            
+            # Store the predicted token
+            captions[:, t] = next_token
+            
+            # Update the input for the next step
+            inputs = next_token.unsqueeze(1)  # (batch_size, 1)
+        
+        return captions

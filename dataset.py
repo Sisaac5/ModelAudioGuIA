@@ -5,7 +5,7 @@ import numpy as np
 
 
 class VideoCaptionDataset(Dataset):
-    def __init__(self, root_dir, df, movies , vocab, transform=None, num_frames=10):
+    def __init__(self, root_dir, df, vocab, transform=None, num_frames=10):
         """
         Dataset para Video Captioning.
         Args:
@@ -17,20 +17,19 @@ class VideoCaptionDataset(Dataset):
         """
         self.root_dir = root_dir
         self.transform = transform
-        self.filter_df = df[df['movie'].isin(movies)]
-
-        self.captions = self.filter_df["text_unnamed"].reset_index(drop=True)
+        self.df = df
+        self.captions = self.df["text_unnamed"].reset_index(drop=True)
         self.vocab = vocab
         self.num_frames = num_frames
         
 
     def __len__(self):
-        return len(self.filter_df)
+        return len(self.df)
 
     def __getitem__(self, idx):
 
-        path_movie_clips = self.filter_df.iloc[idx]['movie_clip']
-        movie_id = str(self.filter_df.iloc[idx]['movie'])
+        path_movie_clips = self.df.iloc[idx]['movie_clip']
+        movie_id = str(self.df.iloc[idx]['movie'])
         frames = np.load(os.path.join(self.root_dir, movie_id,path_movie_clips+".npy"))
 
         if(len(frames)==self.num_frames):
@@ -39,7 +38,7 @@ class VideoCaptionDataset(Dataset):
             selected_frames = np.zeros((self.num_frames, *frames.shape[1:]))
             selected_frames[:len(frames)] = frames
         else:
-            selected_frames = frames[self.df['frames_escolhidos'].iloc[idx][:self.num_frames]]
+            selected_frames = frames[:self.num_frames]
               
         video_tensor = torch.tensor(selected_frames, dtype=torch.float32).unsqueeze(0)  # (num_frames, C, H, W)
 
@@ -47,7 +46,7 @@ class VideoCaptionDataset(Dataset):
         caption = self.captions.iloc[idx]
         caption_vec = [self.vocab.stoi["<SOS>"]]
         caption_vec += self.vocab.numericalize(caption)
-        # caption_vec += [self.vocab.stoi["<EOS>"]]
+        caption_vec += [self.vocab.stoi["<EOS>"]]
      
 
         return video_tensor[0], torch.tensor(caption_vec)
