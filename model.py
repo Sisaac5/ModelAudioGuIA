@@ -133,7 +133,7 @@ class DecoderRNN(nn.Module):
             # Get the most likely next token
             _, next_token = torch.max(outputs, dim=1)  # (batch_size)
             
-            if next_token.item() == 102:
+            if all(number == 102 for number in next_token) == 102:
                 break
             # Store the predicted token
             captions[:, t] = next_token
