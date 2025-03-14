@@ -71,9 +71,6 @@ class EncoderRNN(nn.Module):
         output, hidden = self.rnn(vid_feats)
         return output, hidden
 
-import torch
-import torch.nn as nn
-
 class DecoderRNN(nn.Module):
     def __init__(self, embed_size, hidden_size, vocab_size, num_layers=1, rnn_dropout_p=0.5):
         super(DecoderRNN, self).__init__()

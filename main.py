@@ -47,13 +47,6 @@ if __name__ == "__main__":
     captions_train = df_train['text'].tolist()
     # Create a vocabulary
     tokenizer = BertTokenizer.from_pretrained('bert-base-cased')
-    # vocab = Vocabulary(freq_threshold=1)
-    # vocab.build_vocab(captions_train)
-    # os.makedirs(os.path.join(data_path, 'vocab'), exist_ok=True)
-    # vocab.save_vocab(path=os.path.join(data_path,'vocab','vocab.json'))
-
-    # # Load vocabulary
-    # vocab = Vocabulary.load_vocab(os.path.join(data_path,'vocab','vocab.json'))
 
     transforms = T.Compose([
         T.ToTensor()
