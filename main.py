@@ -18,8 +18,8 @@ from torchsummary import summary
 if __name__ == "__main__":
         
     data_path = './data'
-    captions_csv = 'mad-v2-ad-unnamed-plus.csv'  # Change to test if needed
-    npy_path = os.path.join(data_path, 'clips')
+    captions_csv = '/home/arthur/tail/AudioGuIA/ModelAudioGuIA/data/annotations-someone_comma_teste.csv'  # Change to test if needed
+    npy_path = os.path.join('/home/arthur/tail/AudioGuIA/dataSet', 'Movies')
 
     ### HYPERPARAMETERS
     FEATURES_DIM = 512
@@ -27,12 +27,11 @@ if __name__ == "__main__":
     BATCH_SIZE = 32
     EMBED_SIZE = 512
     HIDDEN_SIZE = 512
-    NUM_LAYERS = 2
+    NUM_LAYERS = 6
     DROPOUT = 0.3
     LEARNING_RATE = 1e-4
-    NUM_EPOCHS = 30
+    NUM_EPOCHS = 60
     MAX_LENGTH = 20
-    ###
 
     # Load dataframes
     df = pd.read_csv(os.path.join(data_path, captions_csv))
@@ -44,7 +43,7 @@ if __name__ == "__main__":
     #df_val, df_test = train_test_split(df_temp, test_size=0.1, random_state=42, shuffle=True)
 
     # Obter as legendas
-    captions_train = df_train['text'].tolist()
+    captions_train = df_train['description'].tolist()
     # Create a vocabulary
     tokenizer = BertTokenizer.from_pretrained('bert-base-cased')
 
@@ -165,7 +164,7 @@ if __name__ == "__main__":
                 for i in range(predicted_captions.size(0)):              
                     predicted_caption = tokenizer.decode(predicted_captions[i], skip_special_tokens=True)
                     results.append({
-                        "video_id": test_dataset.df.iloc[i]['movie_clip'],
+                        "video_id": test_dataset.df.iloc[i]['clipe'],
                         "predicted_caption": predicted_caption,
                         "true_caption": tokenizer.decode(captions[i], skip_special_tokens=True)
                     })

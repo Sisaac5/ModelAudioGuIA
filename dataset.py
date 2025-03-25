@@ -18,7 +18,7 @@ class VideoCaptionDataset(Dataset):
         self.root_dir = root_dir
         self.transform = transform
         self.df = df
-        self.captions = self.df["text_unnamed"].reset_index(drop=True)
+        self.captions = self.df["description"].reset_index(drop=True)
         self.tokenizer = tokenizer
         self.num_frames = num_frames
         self.max_length = max_lenght
@@ -28,9 +28,14 @@ class VideoCaptionDataset(Dataset):
 
     def __getitem__(self, idx):
 
-        path_movie_clips = self.df.iloc[idx]['movie_clip']
+        path_movie_clips = self.df.iloc[idx]['file_path']
         movie_id = str(self.df.iloc[idx]['movie'])
-        frames = np.load(os.path.join(self.root_dir, movie_id,path_movie_clips+".npy"))
+        try:
+          frames = np.load(os.path.join(self.root_dir, path_movie_clips), allow_pickle=True)
+        except:
+            print(os.path.join(self.root_dir, path_movie_clips))
+            #prencher frames com zeros
+            
 
         if(len(frames)==self.num_frames):
             selected_frames = frames
@@ -53,5 +58,4 @@ class VideoCaptionDataset(Dataset):
             return_tensors='pt'
         )
      
-
-        return video_tensor[0], caption_tokens['input_ids'].squeeze(0)
+        return video_tensor[0].squeeze(1), caption_tokens['input_ids'].squeeze(0)

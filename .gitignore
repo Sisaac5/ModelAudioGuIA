@@ -6,3 +6,5 @@ __pycache__/*.pyc
 data/
 __pycache__/
 models/
+temp/
+.temp/temp_video.gif

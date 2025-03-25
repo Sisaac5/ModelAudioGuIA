@@ -6,9 +6,7 @@ from model import VideoCaptioningModel, EncoderRNN, DecoderRNN
 from torchvision import transforms as T
 from transformers import BertTokenizer
 from sklearn.model_selection import train_test_split
-
-data_path = './data'
-npy_path = os.path.join(data_path, 'clips')
+import numpy as np
 model_path = "/home/arthur/tail/AudioGuIA/ModelAudioGuIA/models/best/best_model.pth"
 
 ### HYPERPARAMETERS
@@ -19,7 +17,8 @@ HIDDEN_SIZE = 512
 NUM_LAYERS = 2
 DROPOUT = 0.3
 MAX_LENGTH = 20
-###
+
+
 
 # Load tokenizer
 tokenizer = BertTokenizer.from_pretrained('bert-base-cased')
@@ -40,30 +39,20 @@ transforms = T.Compose([
     T.ToTensor()
 ])
 
-# Load test dataset
-test_csv = 'mad-v2-ad-unnamed-plus.csv'  # Adjust if needed
-df = pd.read_csv(os.path.join(data_path, test_csv))
-df_train, df_test = train_test_split(df, test_size=0.1, random_state=42, shuffle=True)
+#npy path
+npy_path = '/home/arthur/tail/AudioGuIA/dataSet/Movies/0017_Pianist/0017_Pianist_00.02.06.770-00.02.11.041/0017_Pianist_00.02.06.770-00.02.11.041_ViT-B_32.npy'
+frames = np.load(npy_path)
+print(frames.shape)
+selected_frames = frames.squeeze(1)
 
-test_dataset = VideoCaptionDataset(npy_path, df_test, tokenizer, transform=transforms, num_frames=NUM_FRAMES)
+video_tensor = torch.tensor(selected_frames, dtype=torch.float32)
 
 # Perform inference item by item
-results = []
 with torch.no_grad():
-    for i in range(len(test_dataset)):
-        frames, _ = test_dataset[i]
-        frames = frames.to(device).unsqueeze(0)  # Add batch dimension
-        _, hidden = model.encoder(frames)
-        start_token_idx = tokenizer.cls_token_id
-        predicted_caption = model.decoder.inference(hidden, max_len=MAX_LENGTH, start_token_idx=start_token_idx, device=device)
-        
-        predicted_caption_text = tokenizer.decode(predicted_caption[0], skip_special_tokens=True)
-        results.append({
-            "video_id": df_test.iloc[i]['movie_clip'],
-            "predicted_caption": predicted_caption_text
-        })
+  video_tensor = video_tensor.to(device).unsqueeze(0)
+  _, hidden = model.encoder(video_tensor)
+  start_token_idx = tokenizer.cls_token_id
+  predicted_caption = model.decoder.inference(hidden, max_len=30, start_token_idx=start_token_idx, device=device)
+  predicted_caption_text = tokenizer.decode(predicted_caption[0], skip_special_tokens=True)
 
-# Save results to a CSV file
-results_df = pd.DataFrame(results)
-results_df.to_csv(os.path.join(data_path, 'inference_results.csv'), index=False)
-print("Inference results saved to inference_results.csv")
+print(predicted_caption_text)
