@@ -29,20 +29,15 @@ class VideoCaptionDataset(Dataset):
     def __getitem__(self, idx):
 
         path_movie_clips = self.df.iloc[idx]['file_path']
-        movie_id = str(self.df.iloc[idx]['movie'])
-        try:
-          frames = np.load(os.path.join(self.root_dir, path_movie_clips), allow_pickle=True)
-        except:
-            print(os.path.join(self.root_dir, path_movie_clips))
-            #prencher frames com zeros
-            
+        frames = np.load(os.path.join(self.root_dir, path_movie_clips), allow_pickle=True)
+  
 
         if(len(frames)==self.num_frames):
             selected_frames = frames
         elif(len(frames)<self.num_frames):
             selected_frames = np.zeros((self.num_frames, *frames.shape[1:]))
             selected_frames[:len(frames)] = frames
-        else:
+        else:            
             selected_frames = frames[:self.num_frames]
               
         video_tensor = torch.tensor(selected_frames, dtype=torch.float32).unsqueeze(0)  # (num_frames, C, H, W)

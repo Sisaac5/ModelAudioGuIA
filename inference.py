@@ -11,14 +11,12 @@ model_path = "/home/arthur/tail/AudioGuIA/ModelAudioGuIA/models/best/best_model.
 
 ### HYPERPARAMETERS
 FEATURES_DIM = 512
-NUM_FRAMES = 10
+NUM_FRAMES = 20
 EMBED_SIZE = 512
 HIDDEN_SIZE = 512
 NUM_LAYERS = 2
 DROPOUT = 0.3
-MAX_LENGTH = 20
-
-
+MAX_LENGTH = 10
 
 # Load tokenizer
 tokenizer = BertTokenizer.from_pretrained('bert-base-cased')

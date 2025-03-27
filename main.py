@@ -14,11 +14,12 @@ import torch.nn as nn
 from sklearn.model_selection import train_test_split
 from transformers import BertTokenizer
 from torchsummary import summary
+import uuid
 
 if __name__ == "__main__":
         
     data_path = './data'
-    captions_csv = '/home/arthur/tail/AudioGuIA/ModelAudioGuIA/data/annotations-someone_comma_teste.csv'  # Change to test if needed
+    captions_csv = '/home/arthur/tail/AudioGuIA/ModelAudioGuIA/data/annot-harry_potter-someone_path_plus_gender.csv'  # Change to test if needed
     npy_path = os.path.join('/home/arthur/tail/AudioGuIA/dataSet', 'Movies')
 
     ### HYPERPARAMETERS
@@ -27,10 +28,10 @@ if __name__ == "__main__":
     BATCH_SIZE = 32
     EMBED_SIZE = 512
     HIDDEN_SIZE = 512
-    NUM_LAYERS = 6
-    DROPOUT = 0.3
+    NUM_LAYERS = 8
+    DROPOUT = 0.4
     LEARNING_RATE = 1e-4
-    NUM_EPOCHS = 60
+    NUM_EPOCHS = 50
     MAX_LENGTH = 20
 
     # Load dataframes
@@ -119,6 +120,8 @@ if __name__ == "__main__":
     
     criterion = nn.CrossEntropyLoss(ignore_index=tokenizer.pad_token_id)
     best_val_loss = float('inf')
+    #gerar um uuid para salvar o modelo
+    uuid = uuid.uuid4()
     # Training loop
     for epoch in range(NUM_EPOCHS):
         loss_train = 0
@@ -169,13 +172,30 @@ if __name__ == "__main__":
                         "true_caption": tokenizer.decode(captions[i], skip_special_tokens=True)
                     })
             test_loss /= len(test_loader)
-            print(f'Epoch [{epoch+1}/{NUM_EPOCHS}], Test Loss: {test_loss:.4f}')    
+            print(f'Epoch [{epoch+1}/{NUM_EPOCHS}], Test Loss: {test_loss:.4f}') 
+        os.makedirs(os.path.join('/home/arthur/tail/AudioGuIA/ModelAudioGuIA/models', str(uuid)), exist_ok=True)
         if test_loss < best_val_loss:
             best_val_loss = test_loss
-            torch.save(model.state_dict(), os.path.join("/home/arthur/tail/AudioGuIA/ModelAudioGuIA/models/best", 'best_model.pth'))
-            print("Model saved! Epoch: ", epoch)
+            torch.save(model.state_dict(), os.path.join(f"/home/arthur/tail/AudioGuIA/ModelAudioGuIA/models/{str(uuid)}", 'best_model.pth'))
+            #save log with loss, epoch , uuid, hyperparameters
+            with open(os.path.join(f"/home/arthur/tail/AudioGuIA/ModelAudioGuIA/models/{str(uuid)}", 'log.txt'), 'w') as f:
+                f.write(f'Best model saved at epoch {epoch+1} with loss: {best_val_loss}\n')
+                f.write(f'UUID: {uuid}\n')
+                f.write(f'Dataset: {captions_csv}\n')
+                f.write(f'Hyperparameters:\n')
+                f.write(f'FEATURES_DIM: {FEATURES_DIM}\n')
+                f.write(f'NUM_FRAMES: {NUM_FRAMES}\n')
+                f.write(f'BATCH_SIZE: {BATCH_SIZE}\n')
+                f.write(f'EMBED_SIZE: {EMBED_SIZE}\n')
+                f.write(f'HIDDEN_SIZE: {HIDDEN_SIZE}\n')
+                f.write(f'NUM_LAYERS: {NUM_LAYERS}\n')
+                f.write(f'DROPOUT: {DROPOUT}\n')
+                f.write(f'LEARNING_RATE: {LEARNING_RATE}\n')
+                f.write(f'NUM_EPOCHS: {NUM_EPOCHS}\n')
+                f.write(f'MAX_LENGTH: {MAX_LENGTH}\n')
 
         # Save results to a CSV file
         results_df = pd.DataFrame(results)
-        results_df.to_csv(os.path.join(data_path, f'test_results_epoch{epoch}.csv'), index=False)
+        results_df.to_csv(os.path.join(f'/home/arthur/tail/AudioGuIA/ModelAudioGuIA/models/{str(uuid)}', f'test_results_{epoch}.csv'), index=False)
+        
         print("Test results saved to test_results.csv")

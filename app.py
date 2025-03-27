@@ -19,11 +19,16 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 clip_model, preprocess = clip.load("ViT-B/32", device=device)
 
 #Configuração do modelo de Captioning
-model_path = "/home/arthur/tail/AudioGuIA/ModelAudioGuIA/models/best/best_model_primeiro_dataset.pth"
+model_path = "/home/arthur/tail/AudioGuIA/ModelAudioGuIA/models/best/best_model.pth"
 FEATURES_DIM = 512
+NUM_FRAMES = 20
+BATCH_SIZE = 32
+EMBED_SIZE = 512
 HIDDEN_SIZE = 512
-NUM_LAYERS = 2
+NUM_LAYERS = 4
 DROPOUT = 0.3
+LEARNING_RATE = 1e-4
+NUM_EPOCHS = 10
 MAX_LENGTH = 20
 
 # Tokenizer BERT
@@ -49,7 +54,7 @@ def gif_to_base64(gif_path):
         return base64.b64encode(f.read()).decode("utf-8")
 
 # Função para extrair frames do vídeo
-def extract_frames(video_path, num_frames=10):
+def extract_frames(video_path, num_frames=NUM_FRAMES):
     frames = []
     cap = cv2.VideoCapture(video_path)
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
