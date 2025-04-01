@@ -15,30 +15,46 @@ from sklearn.model_selection import train_test_split
 from transformers import BertTokenizer
 from torchsummary import summary
 import uuid
+import json
+import datetime
 
 if __name__ == "__main__":
         
     data_path = './data'
-    captions_csv = '/home/arthur/tail/AudioGuIA/ModelAudioGuIA/data/annot-harry_potter-someone_path_plus_gender.csv'  # Change to test if needed
+    captions_csv = '/home/arthur/tail/AudioGuIA/ModelAudioGuIA/data/annotations-someone_path_plus_gender_without_fantasy_selected_frames_20.csv'  # Change to test if needed
     npy_path = os.path.join('/home/arthur/tail/AudioGuIA/dataSet', 'Movies')
 
     ### HYPERPARAMETERS
     FEATURES_DIM = 512
-    NUM_FRAMES = 10
+    NUM_FRAMES = 20
     BATCH_SIZE = 32
     EMBED_SIZE = 512
     HIDDEN_SIZE = 512
-    NUM_LAYERS = 8
-    DROPOUT = 0.4
+    NUM_LAYERS = 4
+    DROPOUT = 0.3
     LEARNING_RATE = 1e-4
     NUM_EPOCHS = 50
     MAX_LENGTH = 20
 
     # Load dataframes
     df = pd.read_csv(os.path.join(data_path, captions_csv))
+    df['selected_frames'] = df['selected_frames'].apply(json.loads)
 
-    # Dividir entre treino e temp (validação + teste)
-    df_train, df_test = train_test_split(df, test_size=0.15, random_state=42, shuffle=True)
+    #filtrar id == 10
+    # df_train = df[df['id'] == 10]
+    # df_test = df[df['id'] != 10]
+
+    # unique movies
+    movies = df['movie'].unique()
+    #escolher aleatorio um filme para teste e o resto para treino
+    test_movie = np.random.choice(movies)
+    df_train = df[df['movie'] != test_movie]
+    df_test = df[df['movie'] == test_movie]
+
+
+
+    #Dividir entre treino e temp (validação + teste)
+    #df_train, df_test = train_test_split(df, test_size=0.15, random_state=42, shuffle=True)
 
     # Dividir temp entre validação e teste
     #df_val, df_test = train_test_split(df_temp, test_size=0.1, random_state=42, shuffle=True)
@@ -85,7 +101,7 @@ if __name__ == "__main__":
         num_workers=4,
         shuffle=False,
     )
-    
+
     # val_loader = DataLoader(
     #     dataset=val_dataset,
     #     batch_size=BATCH_SIZE,
@@ -167,9 +183,11 @@ if __name__ == "__main__":
                 for i in range(predicted_captions.size(0)):              
                     predicted_caption = tokenizer.decode(predicted_captions[i], skip_special_tokens=True)
                     results.append({
-                        "video_id": test_dataset.df.iloc[i]['clipe'],
+                        "movie": test_dataset.df.iloc[i]['movie'],
                         "predicted_caption": predicted_caption,
-                        "true_caption": tokenizer.decode(captions[i], skip_special_tokens=True)
+                        "true_caption": tokenizer.decode(captions[i], skip_special_tokens=True),
+                        "video_id": test_dataset.df.iloc[i]['clipe']
+
                     })
             test_loss /= len(test_loader)
             print(f'Epoch [{epoch+1}/{NUM_EPOCHS}], Test Loss: {test_loss:.4f}') 
@@ -179,6 +197,8 @@ if __name__ == "__main__":
             torch.save(model.state_dict(), os.path.join(f"/home/arthur/tail/AudioGuIA/ModelAudioGuIA/models/{str(uuid)}", 'best_model.pth'))
             #save log with loss, epoch , uuid, hyperparameters
             with open(os.path.join(f"/home/arthur/tail/AudioGuIA/ModelAudioGuIA/models/{str(uuid)}", 'log.txt'), 'w') as f:
+                #SAVE DATE
+                f.write(f'{datetime.datetime.now()}\n')
                 f.write(f'Best model saved at epoch {epoch+1} with loss: {best_val_loss}\n')
                 f.write(f'UUID: {uuid}\n')
                 f.write(f'Dataset: {captions_csv}\n')

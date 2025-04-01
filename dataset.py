@@ -37,8 +37,8 @@ class VideoCaptionDataset(Dataset):
         elif(len(frames)<self.num_frames):
             selected_frames = np.zeros((self.num_frames, *frames.shape[1:]))
             selected_frames[:len(frames)] = frames
-        else:            
-            selected_frames = frames[:self.num_frames]
+        else:
+            selected_frames = frames[self.df.iloc[idx]['selected_frames']]
               
         video_tensor = torch.tensor(selected_frames, dtype=torch.float32).unsqueeze(0)  # (num_frames, C, H, W)
 
