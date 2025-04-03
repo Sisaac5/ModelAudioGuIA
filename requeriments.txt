@@ -1,0 +1,14 @@
+torch>=2.0.0
+clip-anytorch>=2.0.0
+numpy>=1.23.0
+imageio>=2.25.0
+streamlit>=1.22.0
+Pillow>=9.4.0
+torchvision>=0.15.0
+transformers>=4.28.0
+opencv-python>=4.7.0
+pandas>=1.5.0
+scikit-learn>=1.2.0
+tqdm>=4.65.0
+spacy>=3.5.0
+python-json>=1.0.0
