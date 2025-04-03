@@ -30,23 +30,20 @@ if __name__ == "__main__":
     BATCH_SIZE = 32
     EMBED_SIZE = 512
     HIDDEN_SIZE = 512
-    NUM_LAYERS = 4
+    NUM_LAYERS = 20
     DROPOUT = 0.3
     LEARNING_RATE = 1e-4
-    NUM_EPOCHS = 50
+    NUM_EPOCHS = 200
     MAX_LENGTH = 20
 
     # Load dataframes
     df = pd.read_csv(os.path.join(data_path, captions_csv))
     df['selected_frames'] = df['selected_frames'].apply(json.loads)
 
-    #filtrar id == 10
-    # df_train = df[df['id'] == 10]
-    # df_test = df[df['id'] != 10]
 
-    # unique movies
+    # # unique movies
     movies = df['movie'].unique()
-    #escolher aleatorio um filme para teste e o resto para treino
+    # #escolher aleatorio um filme para teste e o resto para treino
     test_movie = np.random.choice(movies)
     df_train = df[df['movie'] != test_movie]
     df_test = df[df['movie'] == test_movie]
@@ -54,7 +51,7 @@ if __name__ == "__main__":
 
 
     #Dividir entre treino e temp (validação + teste)
-    #df_train, df_test = train_test_split(df, test_size=0.15, random_state=42, shuffle=True)
+    #df_train, df_test = train_test_split(df, test_size=0.99, shuffle=True)
 
     # Dividir temp entre validação e teste
     #df_val, df_test = train_test_split(df_temp, test_size=0.1, random_state=42, shuffle=True)

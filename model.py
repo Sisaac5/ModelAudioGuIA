@@ -17,7 +17,7 @@ class VideoCaptioningModel(nn.Module):
 
 class EncoderRNN(nn.Module):
     def __init__(self, dim_vid, dim_hidden, input_dropout_p=0.2, rnn_dropout_p=0.5,
-                 n_layers=1, bidirectional=False, rnn_cell='gru'):
+                 n_layers=1, bidirectional=False):
         """
 
         Args:
@@ -34,17 +34,11 @@ class EncoderRNN(nn.Module):
         self.rnn_dropout_p = rnn_dropout_p
         self.n_layers = n_layers
         self.bidirectional = bidirectional
-        self.rnn_cell = rnn_cell
 
         self.vid2hid = nn.Linear(dim_vid, dim_hidden)
         self.input_dropout = nn.Dropout(input_dropout_p)
 
-        if rnn_cell.lower() == 'lstm':
-            self.rnn_cell = nn.LSTM
-        elif rnn_cell.lower() == 'gru':
-            self.rnn_cell = nn.GRU
-
-        self.rnn = self.rnn_cell(dim_hidden, dim_hidden, n_layers, batch_first=True,
+        self.rnn = nn.LSTM(dim_hidden, dim_hidden, n_layers, batch_first=True,
                                 bidirectional=bidirectional, dropout=self.rnn_dropout_p)
 
         self._init_hidden()
@@ -69,13 +63,14 @@ class EncoderRNN(nn.Module):
         vid_feats = vid_feats.view(batch_size, seq_len, self.dim_hidden)
         self.rnn.flatten_parameters()
         output, hidden = self.rnn(vid_feats)
+        
         return output, hidden
 
 class DecoderRNN(nn.Module):
     def __init__(self, embed_size, hidden_size, vocab_size, num_layers=1, rnn_dropout_p=0.5):
         super(DecoderRNN, self).__init__()
         self.embed = nn.Embedding(vocab_size, embed_size)
-        self.rnn = nn.GRU(embed_size, hidden_size, num_layers, batch_first=True, dropout= rnn_dropout_p)
+        self.rnn = nn.LSTM(embed_size, hidden_size, num_layers, batch_first=True, dropout=rnn_dropout_p)
         self.linear = nn.Linear(hidden_size, vocab_size)
         self.vocab_size = vocab_size
 
@@ -109,7 +104,7 @@ class DecoderRNN(nn.Module):
         Returns:
             captions: Generated captions of shape (batch_size, max_len).
         """
-        batch_size = hidden.size(1)
+        batch_size = hidden[0].size(1)
         
         # Initialize the first input token as <SOS>
         inputs = torch.full((batch_size, 1), start_token_idx, dtype=torch.long).to(device)  # (batch_size, 1)
