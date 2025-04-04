@@ -36,6 +36,12 @@ Inicialmente é importante instalar os pacotes necessários presentes no arquivo
    pip install -r requeriments.txt
    ```  
 É importante ressaltar que não estamos autorizados a prover acesso aos datasets citados anteriormente, dessa forma a etapa de processamento e organização de dados permanecerá oculta nessa documentação.
+Além disso, é necessário instalar o modelo inglês do Spacy. 
+
+   ```bash
+  python -m spacy download en_core_web_sm
+   ```  
+
 Tendo os dados em sua versão final, basta realizar o treinamento.
 
    ```bash
