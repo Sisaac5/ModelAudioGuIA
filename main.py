@@ -1,218 +1,233 @@
-import os
 import torch
+import torch.nn as nn
+from torch.utils.data import DataLoader
+import json
+import os
+from transformers import BertTokenizer
+from model import EncoderLSTM, DecoderLSTM, VideoCaptioningModel
+from dataset import VideoDataset
+import pandas as pd
 from tqdm import tqdm
 import numpy as np
-from torch.utils.data import DataLoader
-from dataset import VideoCaptionDataset
-from model import VideoCaptioningModel, EncoderRNN, DecoderRNN
-from utils import custom_collate_fn
-import pandas as pd
-from vocabulary import Vocabulary
-from torchvision import transforms as T
-import torch.optim as optim
-import torch.nn as nn
 from sklearn.model_selection import train_test_split
-from transformers import BertTokenizer
-from torchsummary import summary
-import uuid
-import json
-import datetime
+from sentence_transformers import SentenceTransformer
+from nltk.translate.bleu_score import corpus_bleu
+from nltk.tokenize import word_tokenize
+from nltk.translate.meteor_score import meteor_score
+from bert_score import score as bert_score
+
+# Environment configurations
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+os.environ['TOKENIZERS_PARALLELISM'] = 'false'
+torch.backends.cudnn.logging = False
+
+# Hyperparameters
+INPUT_DIM = 512
+HID_DIM = 512
+N_LAYERS = 10
+ENC_DROPOUT = 0.2
+DEC_DROPOUT = 0.2
+BATCH_SIZE = 32
+MAX_SEQ_LEN = 20
+NUM_EPOCHS = 20
+CLIP = 1
+LR = 1e-3
+TRAIN_RATIO = 0.7
+VAL_RATIO = 0.15
+TEST_RATIO = 0.15
+
+npy_root = '/home/arthur/tail/AudioGuIA/dataSet/Movies'
+
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+
+def train(model, dataloader, optimizer, criterion, device):
+    model.train()
+    total_loss = 0
+    progress_bar = tqdm(dataloader, desc="Training", leave=False)
+    
+    for frames, input_ids in progress_bar:
+        frames = frames.to(device)
+        input_ids = input_ids.to(device)
+        
+        optimizer.zero_grad()
+        outputs = model(frames, input_ids)
+        
+        outputs = outputs[:, 1:].reshape(-1, outputs.shape[-1])
+        targets = input_ids[:, 1:].reshape(-1)
+        
+        loss = criterion(outputs, targets)
+        loss.backward()
+        nn.utils.clip_grad_norm_(model.parameters(), CLIP)
+        optimizer.step()
+        
+        total_loss += loss.item()
+        progress_bar.set_postfix({'loss': f'{loss.item():.4f}'})
+    
+    return total_loss / len(dataloader)
+
+def validate(model, dataloader, criterion, device):
+    model.eval()
+    total_loss = 0
+    progress_bar = tqdm(dataloader, desc="Validating", leave=False)
+    
+    with torch.no_grad():
+        for frames, input_ids in progress_bar:
+            frames = frames.to(device)
+            input_ids = input_ids.to(device)
+            
+            outputs = model(frames, input_ids)
+            
+            outputs = outputs[:, 1:].reshape(-1, outputs.shape[-1])
+            targets = input_ids[:, 1:].reshape(-1)
+            
+            loss = criterion(outputs, targets)
+            total_loss += loss.item()
+            progress_bar.set_postfix({'val_loss': f'{loss.item():.4f}'})
+    
+    return total_loss / len(dataloader)
+
+
+def evaluate(model, dataloader, tokenizer, device, max_len=20):
+    model.eval()
+    all_references = []
+    all_predictions = []
+    cos_model = SentenceTransformer('all-MiniLM-L6-v2')
+    results = {}
+    index = 0
+    with torch.no_grad():
+        for frames, input_ids in dataloader:
+            frames = frames.to(device)
+            input_ids = input_ids.to(device)
+            
+            # Generate predictions
+            encoder_outputs, hidden, cell = model.encoder(frames)
+            predictions = input_ids[:, 0].unsqueeze(1)
+            
+            for _ in range(max_len-1):
+                output, hidden, cell = model.decoder(predictions[:, -1].unsqueeze(1), 
+                                     encoder_outputs, hidden, cell)
+                next_token = output.argmax(1)
+                predictions = torch.cat((predictions, next_token.unsqueeze(1)), dim=1)
+            
+            # Decode predictions and references
+            pred_texts = [tokenizer.decode(ids, skip_special_tokens=True) 
+                          for ids in predictions.cpu().numpy()]
+            ref_texts = [tokenizer.decode(ids, skip_special_tokens=True) 
+                         for ids in input_ids.cpu().numpy()]
+            
+            text_pairs = {}
+        
+            for i, (pred, ref) in enumerate(zip(pred_texts, ref_texts), 1):
+              text_pairs[f'text_{i}'] = {
+                  'pred': pred,
+                  'ref': ref
+              }
+
+            results[f'{index}'] = text_pairs
+            index += 1
+
+            # Tokenize for METEOR
+            pred_texts_tokenized = [word_tokenize(pred) for pred in pred_texts]
+            ref_texts_tokenized = [[word_tokenize(ref)] for ref in ref_texts]
+            
+            all_predictions.extend(pred_texts_tokenized)
+            all_references.extend(ref_texts_tokenized)
+    
+    # Calculate metrics
+    try:
+        bleu4 = corpus_bleu(all_references, all_predictions)
+        meteor = np.mean([meteor_score(ref, pred) for ref, pred in zip(all_references, all_predictions)])
+        
+        # For BERTScore and cosine similarity, we need the original strings
+        pred_strings = [' '.join(pred) for pred in all_predictions]
+        ref_strings = [' '.join(ref[0]) for ref in all_references]
+        
+        # BERTScore
+        P, R, F1 = bert_score(pred_strings, ref_strings, lang='en')
+        
+        # Cosine similarity
+        pred_embeds = cos_model.encode(pred_strings)
+        ref_embeds = cos_model.encode(ref_strings)
+        cosine_sim = np.diag(np.matmul(pred_embeds, ref_embeds.T))
+        
+        #save results
+        with open('models/results.json', 'w') as f:
+            json.dump(results, f, indent=4)
+        return {
+            'BLEU-4': bleu4,
+            'METEOR': meteor,
+            'BERTScore-F1': F1.mean().item(),
+            'Cosine': np.mean(cosine_sim)
+        }
+    except Exception as e:
+        print(f"Error during evaluation: {e}")
+        return None
 
 if __name__ == "__main__":
-        
-    data_path = './data'
-    captions_csv = '/home/arthur/tail/AudioGuIA/ModelAudioGuIA/data/annotations-someone_path_plus_gender_without_fantasy_selected_frames_20.csv'  # Change to test if needed
-    npy_path = os.path.join('/home/arthur/tail/AudioGuIA/dataSet', 'Movies')
-
-    ### HYPERPARAMETERS
-    FEATURES_DIM = 512
-    NUM_FRAMES = 20
-    BATCH_SIZE = 32
-    EMBED_SIZE = 512
-    HIDDEN_SIZE = 512
-    NUM_LAYERS = 20
-    DROPOUT = 0.3
-    LEARNING_RATE = 1e-4
-    NUM_EPOCHS = 200
-    MAX_LENGTH = 20
-
-    # Load dataframes
-    df = pd.read_csv(os.path.join(data_path, captions_csv))
-    df['selected_frames'] = df['selected_frames'].apply(json.loads)
-
-
-    # # unique movies
-    movies = df['movie'].unique()
-    # #escolher aleatorio um filme para teste e o resto para treino
-    test_movie = np.random.choice(movies)
-    df_train = df[df['movie'] != test_movie]
-    df_test = df[df['movie'] == test_movie]
-
-
-
-    #Dividir entre treino e temp (validação + teste)
-    #df_train, df_test = train_test_split(df, test_size=0.99, shuffle=True)
-
-    # Dividir temp entre validação e teste
-    #df_val, df_test = train_test_split(df_temp, test_size=0.1, random_state=42, shuffle=True)
-
-    # Obter as legendas
-    captions_train = df_train['description'].tolist()
-    # Create a vocabulary
-    tokenizer = BertTokenizer.from_pretrained('bert-base-cased')
-
-    transforms = T.Compose([
-        T.ToTensor()
-    ])
-
-    # Create datasets
-    train_dataset = VideoCaptionDataset(npy_path, 
-                                        df_train,
-                                        tokenizer,
-                                        transform=transforms,
-                                        num_frames=NUM_FRAMES
-                                        )
-    test_dataset = VideoCaptionDataset(npy_path,
-                                    df_test,
-                                    tokenizer, 
-                                    transform=transforms,
-                                        num_frames=NUM_FRAMES
-                                    )
-    # val_dataset = VideoCaptionDataset(npy_path, 
-    #                                 df_val,                                     
-    #                                 tokenizer,
-    #                                 transform=transforms,
-    #                                     num_frames=NUM_FRAMES
-    #                                 )
-
-    train_loader = DataLoader(
-        dataset=train_dataset,
-        batch_size=BATCH_SIZE,
-        num_workers=4,
-        shuffle=True,
-    )
-
-    test_loader = DataLoader(
-        dataset=test_dataset,
-        batch_size=BATCH_SIZE,
-        num_workers=4,
-        shuffle=False,
-    )
-
-    # val_loader = DataLoader(
-    #     dataset=val_dataset,
-    #     batch_size=BATCH_SIZE,
-    #     num_workers=4,
-    #     shuffle=False,
-    # )
+    # Load and split data
+    dataframe = pd.read_csv('data/annot-harry_potter-someone_path_plus_gender_selected_frames_20.csv')
+    dataframe['selected_frames'] = dataframe['selected_frames'].apply(json.loads)
     
-    vocab_size = tokenizer.vocab_size
-
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-    encoder = EncoderRNN(FEATURES_DIM,
-                          HIDDEN_SIZE,
-                          n_layers=NUM_LAYERS,
-                          rnn_dropout_p=DROPOUT
-                          )
-    decoder = DecoderRNN(EMBED_SIZE, 
-                         HIDDEN_SIZE,                          
-                         vocab_size, 
-                         num_layers=NUM_LAYERS,
-                          rnn_dropout_p=DROPOUT
-                         )
-
-    model = VideoCaptioningModel(encoder, 
-                                 decoder
-                                 ).to(device)
+    # Split by movies
+    movies = dataframe['movie'].unique()
+    train_movies, test_movies = train_test_split(movies, test_size=TEST_RATIO, random_state=42)
+    train_movies, val_movies = train_test_split(train_movies, test_size=VAL_RATIO/(1-TEST_RATIO), random_state=42)
     
-    # summary(model,input_size=[(1, NUM_FRAMES, 512, 512), (BATCH_SIZE, MAX_LENGTH)])
-    # exit()
-    optimizer = optim.Adam(model.parameters(),
-                            lr=LEARNING_RATE)
+    train_df = dataframe[dataframe['movie'].isin(train_movies)].reset_index(drop=True)
+    val_df = dataframe[dataframe['movie'].isin(val_movies)].reset_index(drop=True)
+    test_df = dataframe[dataframe['movie'].isin(test_movies)].reset_index(drop=True)
+
+    # Create datasets and dataloaders
+    dataset_train = VideoDataset(train_df, num_frames=20, 
+                               npy_root=npy_root,
+                               tokenizer=tokenizer, max_seq_len=MAX_SEQ_LEN)
+    dataset_val = VideoDataset(val_df, num_frames=20,
+                             npy_root=npy_root,
+                             tokenizer=tokenizer, max_seq_len=MAX_SEQ_LEN)
+    dataset_test = VideoDataset(test_df, num_frames=20,
+                              npy_root=npy_root,
+                              tokenizer=tokenizer, max_seq_len=MAX_SEQ_LEN)
+
+    train_loader = DataLoader(dataset_train, batch_size=BATCH_SIZE, shuffle=True)
+    val_loader = DataLoader(dataset_val, batch_size=BATCH_SIZE, shuffle=False)
+    test_loader = DataLoader(dataset_test, batch_size=BATCH_SIZE, shuffle=False)
+
+    # Initialize model
+    encoder = EncoderLSTM(input_size=INPUT_DIM, 
+                          hidden_size=HID_DIM,
+                          num_layers=N_LAYERS,
+                          dropout=ENC_DROPOUT)
+    decoder = DecoderLSTM(vocab_size=tokenizer.vocab_size, 
+                          embed_size=HID_DIM,
+                          hidden_size=HID_DIM,
+                          encoder_hidden_size=HID_DIM,
+                          num_layers=N_LAYERS,
+                          dropout=DEC_DROPOUT)
     
+    model = VideoCaptioningModel(encoder, decoder, device).to(device)
+
+    optimizer = torch.optim.Adam(model.parameters(), lr=LR)
     criterion = nn.CrossEntropyLoss(ignore_index=tokenizer.pad_token_id)
-    best_val_loss = float('inf')
-    #gerar um uuid para salvar o modelo
-    uuid = uuid.uuid4()
+
     # Training loop
+    best_val_loss = float('inf')
     for epoch in range(NUM_EPOCHS):
-        loss_train = 0
-        model.train()
-        for frames, captions in tqdm(train_loader):
-            optimizer.zero_grad()
-            frames = frames.to(device)
-            captions = captions.to(device)
-            
-            # Forward pass
-            outputs = model(frames, captions[:, :-1])
-            
-            # Compute loss
-            loss = criterion(outputs.view(-1, vocab_size), captions[:, 1:].reshape(-1))
-            loss_train += loss.item()
-            
-            # Backward pass and optimize
-            loss.backward()
-            optimizer.step()
-
-        loss_train = loss_train / len(train_loader)
-        print(f'Epoch [{epoch+1}/{NUM_EPOCHS}], Loss: {loss.item():.4f}')
-
-        # Test loop
-        model.eval()
-        results = []
-        test_loss = 0
-        with torch.no_grad():
-            for frames, captions in tqdm(test_loader):
-                frames = frames.to(device)
-                captions = captions.to(device)
-                
-                # Get hidden state from the encoder
-                _, hidden = model.encoder(frames)
-                
-                # Generate captions using the decoder
-                start_token_idx = tokenizer.cls_token_id
-                predicted_captions = model.decoder.inference(hidden, max_len=20, start_token_idx=start_token_idx, device=device)
-                outputs = model(frames, captions[:, :-1])
-
-                test_loss += criterion(outputs.view(-1, vocab_size), captions[:, 1:].reshape(-1)).item()
-                # Convert token indices to words
-                for i in range(predicted_captions.size(0)):              
-                    predicted_caption = tokenizer.decode(predicted_captions[i], skip_special_tokens=True)
-                    results.append({
-                        "movie": test_dataset.df.iloc[i]['movie'],
-                        "predicted_caption": predicted_caption,
-                        "true_caption": tokenizer.decode(captions[i], skip_special_tokens=True),
-                        "video_id": test_dataset.df.iloc[i]['clipe']
-
-                    })
-            test_loss /= len(test_loader)
-            print(f'Epoch [{epoch+1}/{NUM_EPOCHS}], Test Loss: {test_loss:.4f}') 
-        os.makedirs(os.path.join('/home/arthur/tail/AudioGuIA/ModelAudioGuIA/models', str(uuid)), exist_ok=True)
-        if test_loss < best_val_loss:
-            best_val_loss = test_loss
-            torch.save(model.state_dict(), os.path.join(f"/home/arthur/tail/AudioGuIA/ModelAudioGuIA/models/{str(uuid)}", 'best_model.pth'))
-            #save log with loss, epoch , uuid, hyperparameters
-            with open(os.path.join(f"/home/arthur/tail/AudioGuIA/ModelAudioGuIA/models/{str(uuid)}", 'log.txt'), 'w') as f:
-                #SAVE DATE
-                f.write(f'{datetime.datetime.now()}\n')
-                f.write(f'Best model saved at epoch {epoch+1} with loss: {best_val_loss}\n')
-                f.write(f'UUID: {uuid}\n')
-                f.write(f'Dataset: {captions_csv}\n')
-                f.write(f'Hyperparameters:\n')
-                f.write(f'FEATURES_DIM: {FEATURES_DIM}\n')
-                f.write(f'NUM_FRAMES: {NUM_FRAMES}\n')
-                f.write(f'BATCH_SIZE: {BATCH_SIZE}\n')
-                f.write(f'EMBED_SIZE: {EMBED_SIZE}\n')
-                f.write(f'HIDDEN_SIZE: {HIDDEN_SIZE}\n')
-                f.write(f'NUM_LAYERS: {NUM_LAYERS}\n')
-                f.write(f'DROPOUT: {DROPOUT}\n')
-                f.write(f'LEARNING_RATE: {LEARNING_RATE}\n')
-                f.write(f'NUM_EPOCHS: {NUM_EPOCHS}\n')
-                f.write(f'MAX_LENGTH: {MAX_LENGTH}\n')
-
-        # Save results to a CSV file
-        results_df = pd.DataFrame(results)
-        results_df.to_csv(os.path.join(f'/home/arthur/tail/AudioGuIA/ModelAudioGuIA/models/{str(uuid)}', f'test_results_{epoch}.csv'), index=False)
+        train_loss = train(model, train_loader, optimizer, criterion, device)
+        val_loss = validate(model, val_loader, criterion, device)
         
-        print("Test results saved to test_results.csv")
+        print(f'Epoch {epoch+1:02}')
+        print(f'\tTrain Loss: {train_loss:.3f}')
+        print(f'\t Val. Loss: {val_loss:.3f}')
+        
+        # Save best model
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            torch.save(model.state_dict(), 'models/best_model.pt')
+
+    # Final evaluation
+    model.load_state_dict(torch.load('models/best_model.pt'))
+    test_metrics = evaluate(model, test_loader, tokenizer, device)
+    print("\nTest Metrics:")
+    for k, v in test_metrics.items():
+        print(f"{k}: {v:.4f}")

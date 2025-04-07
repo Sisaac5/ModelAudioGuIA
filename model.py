@@ -1,136 +1,93 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
+import random
+
+class Attention(nn.Module):
+    def __init__(self, hidden_size, encoder_hidden_size):
+        super().__init__()
+        self.W = nn.Linear(hidden_size + encoder_hidden_size, hidden_size)
+        self.v = nn.Linear(hidden_size, 1, bias=False)
+    
+    def forward(self, hidden, encoder_outputs):
+        # hidden: (batch_size, hidden_size)
+        # encoder_outputs: (batch_size, seq_len, encoder_hidden_size)
+        seq_len = encoder_outputs.size(1)
+        hidden = hidden.unsqueeze(1).expand(-1, seq_len, -1)
+        energy = torch.tanh(self.W(torch.cat((hidden, encoder_outputs), dim=2)))
+        attention = self.v(energy).squeeze(2)
+        attention_weights = F.softmax(attention, dim=1)
+        context = torch.bmm(attention_weights.unsqueeze(1), encoder_outputs).squeeze(1)
+        return context, attention_weights
+
+class EncoderLSTM(nn.Module):
+    def __init__(self, input_size, hidden_size, num_layers, dropout=0.3):
+        super().__init__()
+        self.lstm = nn.LSTM(input_size, 
+                           hidden_size, 
+                           num_layers, 
+                           batch_first=True,
+                           dropout=dropout if num_layers > 1 else 0)
+        self.dropout = nn.Dropout(dropout)
+    
+    def forward(self, x):
+        outputs, (hidden, cell) = self.lstm(x)
+        outputs = self.dropout(outputs)  # Apply dropout to all LSTM outputs
+        return outputs, hidden, cell
+
+class DecoderLSTM(nn.Module):
+    def __init__(self, vocab_size, embed_size, hidden_size, encoder_hidden_size, 
+                 num_layers, dropout=0.3):
+        super().__init__()
+        self.embedding = nn.Embedding(vocab_size, embed_size)
+        self.dropout_embed = nn.Dropout(dropout)
+        self.lstm = nn.LSTM(embed_size + encoder_hidden_size, 
+                           hidden_size, 
+                           num_layers, 
+                           batch_first=True,
+                           dropout=dropout if num_layers > 1 else 0)
+        self.attention = Attention(hidden_size, encoder_hidden_size)
+        self.dropout_attn = nn.Dropout(dropout)
+        self.fc = nn.Linear(hidden_size, vocab_size)
+        self.dropout_fc = nn.Dropout(dropout)
+    
+    def forward(self, x, encoder_outputs, hidden, cell):
+        embedded = self.embedding(x)
+        embedded = self.dropout_embed(embedded)  # Dropout on embeddings
+        
+        context, attn_weights = self.attention(hidden[-1], encoder_outputs)
+        context = self.dropout_attn(context).unsqueeze(1)  # Dropout on attention context
+        
+        lstm_input = torch.cat([embedded, context], dim=2)
+        output, (hidden, cell) = self.lstm(lstm_input, (hidden, cell))
+        
+        output = self.dropout_fc(output)  # Dropout before final layer
+        output = self.fc(output.squeeze(1))
+        
+        return output, hidden, cell
 
 class VideoCaptioningModel(nn.Module):
-    def __init__(self, encoder, decoder):
-        super(VideoCaptioningModel, self).__init__()
+    def __init__(self, encoder, decoder, device):
+        super().__init__()
         self.encoder = encoder
         self.decoder = decoder
-
-    def forward(self, vid_feats, captions):
-        # Encode video features
-        encoder_output, hidden = self.encoder(vid_feats)
+        self.device = device
+    
+    def forward(self, frames, input_ids, teacher_forcing_ratio=0.9):
+        batch_size = input_ids.size(0)
+        target_len = input_ids.size(1)
+        vocab_size = self.decoder.fc.out_features
         
-        # Decode captions
-        outputs = self.decoder(captions, hidden)
+        outputs = torch.zeros(batch_size, target_len, vocab_size).to(self.device)
+        encoder_outputs, hidden, cell = self.encoder(frames)
+        
+        input = input_ids[:, 0].unsqueeze(1)
+        
+        for t in range(1, target_len):
+            output, hidden, cell = self.decoder(input, encoder_outputs, hidden, cell)
+            outputs[:, t] = output
+            teacher_force = random.random() < teacher_forcing_ratio
+            top1 = output.argmax(1)
+            input = input_ids[:, t].unsqueeze(1) if teacher_force else top1.unsqueeze(1)
+        
         return outputs
-
-class EncoderRNN(nn.Module):
-    def __init__(self, dim_vid, dim_hidden, input_dropout_p=0.2, rnn_dropout_p=0.5,
-                 n_layers=1, bidirectional=False):
-        """
-
-        Args:
-            hidden_dim (int): dim of hidden state of rnn
-            input_dropout_p (int): dropout probability for the input sequence
-            dropout_p (float): dropout probability for the output sequence
-            n_layers (int): number of rnn layers
-            rnn_cell (str): type of RNN cell ('LSTM'/'GRU')
-        """
-        super(EncoderRNN, self).__init__()
-        self.dim_vid = dim_vid
-        self.dim_hidden = dim_hidden
-        self.input_dropout_p = input_dropout_p
-        self.rnn_dropout_p = rnn_dropout_p
-        self.n_layers = n_layers
-        self.bidirectional = bidirectional
-
-        self.vid2hid = nn.Linear(dim_vid, dim_hidden)
-        self.input_dropout = nn.Dropout(input_dropout_p)
-
-        self.rnn = nn.LSTM(dim_hidden, dim_hidden, n_layers, batch_first=True,
-                                bidirectional=bidirectional, dropout=self.rnn_dropout_p)
-
-        self._init_hidden()
-
-    def _init_hidden(self):
-        nn.init.xavier_normal_(self.vid2hid.weight)
-
-    def forward(self, vid_feats):
-        """
-        Applies a multi-layer RNN to an input sequence.
-        Args:
-            input_var (batch, seq_len): tensor containing the features of the input sequence.
-            input_lengths (list of int, optional): A list that contains the lengths of sequences
-              in the mini-batch
-        Returns: output, hidden
-            - **output** (batch, seq_len, hidden_size): variable containing the encoded features of the input sequence
-            - **hidden** (num_layers * num_directions, batch, hidden_size): variable containing the features in the hidden state h
-        """        
-        batch_size, seq_len, dim_vid = vid_feats.size()
-        vid_feats = self.vid2hid(vid_feats.view(-1, dim_vid))
-        vid_feats = self.input_dropout(vid_feats)
-        vid_feats = vid_feats.view(batch_size, seq_len, self.dim_hidden)
-        self.rnn.flatten_parameters()
-        output, hidden = self.rnn(vid_feats)
-        
-        return output, hidden
-
-class DecoderRNN(nn.Module):
-    def __init__(self, embed_size, hidden_size, vocab_size, num_layers=1, rnn_dropout_p=0.5):
-        super(DecoderRNN, self).__init__()
-        self.embed = nn.Embedding(vocab_size, embed_size)
-        self.rnn = nn.LSTM(embed_size, hidden_size, num_layers, batch_first=True, dropout=rnn_dropout_p)
-        self.linear = nn.Linear(hidden_size, vocab_size)
-        self.vocab_size = vocab_size
-
-    def forward(self, captions, hidden):
-        """
-        Forward pass for training.
-        Args:
-            captions: Ground truth captions of shape (batch_size, caption_length).
-            hidden: Initial hidden state from the encoder of shape (num_layers, batch_size, hidden_size).
-        Returns:
-            outputs: Predicted word scores of shape (batch_size, caption_length, vocab_size).
-        """
-        # Embed captions
-        embeddings = self.embed(captions)  # (batch_size, caption_length, embed_size)
-        
-        # Pass through RNN
-        rnn_out, hidden = self.rnn(embeddings, hidden)  # rnn_out: (batch_size, caption_length, hidden_size)
-        
-        # Predict next word
-        outputs = self.linear(rnn_out)  # (batch_size, caption_length, vocab_size)
-        return outputs
-
-    def inference(self, hidden, max_len=20, start_token_idx=None, device=None):
-        """
-        Inference mode: Generate captions token-by-token.
-        Args:
-            hidden: Initial hidden state from the encoder of shape (num_layers, batch_size, hidden_size).
-            max_len: Maximum length of the generated caption.
-            start_token_idx: Index of the <SOS> token.
-            device: Device to use (e.g., 'cuda' or 'cpu').
-        Returns:
-            captions: Generated captions of shape (batch_size, max_len).
-        """
-        batch_size = hidden[0].size(1)
-        
-        # Initialize the first input token as <SOS>
-        inputs = torch.full((batch_size, 1), start_token_idx, dtype=torch.long).to(device)  # (batch_size, 1)
-        
-        # Store the generated captions
-        captions = torch.zeros((batch_size, max_len), dtype=torch.long).to(device)
-        
-        for t in range(max_len):
-            # Embed the input token
-            embeddings = self.embed(inputs)  # (batch_size, 1, embed_size)
-            
-            # Pass through RNN
-            rnn_out, hidden = self.rnn(embeddings, hidden)  # rnn_out: (batch_size, 1, hidden_size)
-            
-            # Predict the next word
-            outputs = self.linear(rnn_out.squeeze(1))  # (batch_size, vocab_size)
-            
-            # Get the most likely next token
-            _, next_token = torch.max(outputs, dim=1)  # (batch_size)
-            
-            if all(number == 102 for number in next_token):
-                break
-            # Store the predicted token
-            captions[:, t] = next_token
-            
-            # Update the input for the next step
-            inputs = next_token.unsqueeze(1)  # (batch_size, 1)
-        
-        return captions
