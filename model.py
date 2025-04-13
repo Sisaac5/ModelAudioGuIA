@@ -1,127 +1,93 @@
-from torch import nn
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
+import random
 
 class Attention(nn.Module):
-    def __init__(self, encoder_dim, decoder_dim, attention_dim):
-        super(Attention, self).__init__()
-        self.attention_dim = attention_dim
-        self.W = nn.Linear(decoder_dim, attention_dim)
-        self.U = nn.Linear(encoder_dim, attention_dim)
-        self.A = nn.Linear(attention_dim, 1)
+    def __init__(self, hidden_size, encoder_hidden_size):
+        super().__init__()
+        self.W = nn.Linear(hidden_size + encoder_hidden_size, hidden_size)
+        self.v = nn.Linear(hidden_size, 1, bias=False)
+    
+    def forward(self, hidden, encoder_outputs):
+        # hidden: (batch_size, hidden_size)
+        # encoder_outputs: (batch_size, seq_len, encoder_hidden_size)
+        seq_len = encoder_outputs.size(1)
+        hidden = hidden.unsqueeze(1).expand(-1, seq_len, -1)
+        energy = torch.tanh(self.W(torch.cat((hidden, encoder_outputs), dim=2)))
+        attention = self.v(energy).squeeze(2)
+        attention_weights = F.softmax(attention, dim=1)
+        context = torch.bmm(attention_weights.unsqueeze(1), encoder_outputs).squeeze(1)
+        return context, attention_weights
 
-    def forward(self, features, hidden_state):
-        u_hs = self.U(features)  # (batch_size, num_features, attention_dim)
-        w_ah = self.W(hidden_state)  # (batch_size, attention_dim)
+class EncoderLSTM(nn.Module):
+    def __init__(self, input_size, hidden_size, num_layers, dropout=0.3):
+        super().__init__()
+        self.lstm = nn.LSTM(input_size, 
+                           hidden_size, 
+                           num_layers, 
+                           batch_first=True,
+                           dropout=dropout if num_layers > 1 else 0)
+        self.dropout = nn.Dropout(dropout)
+    
+    def forward(self, x):
+        outputs, (hidden, cell) = self.lstm(x)
+        outputs = self.dropout(outputs)  # Apply dropout to all LSTM outputs
+        return outputs, hidden, cell
 
-        combined_states = torch.tanh(u_hs + w_ah.unsqueeze(1))  # (batch_size, num_features, attention_dim)
-        attention_scores = self.A(combined_states)  # (batch_size, num_features, 1)
-        attention_scores = attention_scores.squeeze(2)  # (batch_size, num_features)
-
-        alpha = F.softmax(attention_scores, dim=1)  # (batch_size, num_features)
-        attention_weights = features * alpha.unsqueeze(2)  # (batch_size, num_features, encoder_dim)
-        attention_weights = attention_weights.sum(dim=1)  # (batch_size, encoder_dim)
-        return alpha, attention_weights
-
-
-class DecoderRNN(nn.Module):
-    def __init__(self, embed_size, vocab_size, attention_dim, encoder_dim, decoder_dim, drop_prob=0.3):
+class DecoderLSTM(nn.Module):
+    def __init__(self, vocab_size, embed_size, hidden_size, encoder_hidden_size, 
+                 num_layers, dropout=0.3):
         super().__init__()
         self.embedding = nn.Embedding(vocab_size, embed_size)
-        self.attention = Attention(encoder_dim, decoder_dim, attention_dim)
-        self.lstm_cell = nn.LSTMCell(embed_size + encoder_dim, decoder_dim, bias=True)
-        self.init_h = nn.Linear(encoder_dim, decoder_dim)
-        self.init_c = nn.Linear(encoder_dim, decoder_dim)
-        self.f_beta = nn.Linear(decoder_dim, encoder_dim)
-        self.fcn = nn.Linear(decoder_dim, vocab_size)
-        self.drop = nn.Dropout(drop_prob)
+        self.dropout_embed = nn.Dropout(dropout)
+        self.lstm = nn.LSTM(embed_size + encoder_hidden_size, 
+                           hidden_size, 
+                           num_layers, 
+                           batch_first=True,
+                           dropout=dropout if num_layers > 1 else 0)
+        self.attention = Attention(hidden_size, encoder_hidden_size)
+        self.dropout_attn = nn.Dropout(dropout)
+        self.fc = nn.Linear(hidden_size, vocab_size)
+        self.dropout_fc = nn.Dropout(dropout)
+    
+    def forward(self, x, encoder_outputs, hidden, cell):
+        embedded = self.embedding(x)
+        embedded = self.dropout_embed(embedded)  # Dropout on embeddings
+        
+        context, attn_weights = self.attention(hidden[-1], encoder_outputs)
+        context = self.dropout_attn(context).unsqueeze(1)  # Dropout on attention context
+        
+        lstm_input = torch.cat([embedded, context], dim=2)
+        output, (hidden, cell) = self.lstm(lstm_input, (hidden, cell))
+        
+        output = self.dropout_fc(output)  # Dropout before final layer
+        output = self.fc(output.squeeze(1))
+        
+        return output, hidden, cell
 
-    def forward(self, features, captions):
-        embeds = self.embedding(captions)
-        h, c = self.init_hidden_state(features)
-        seq_length = len(captions[0]) - 1
-        batch_size = captions.size(0)
-        num_features = features.size(1)
-
-        preds = torch.zeros(batch_size, seq_length, self.fcn.out_features).to(features.device)
-        alphas = torch.zeros(batch_size, seq_length, num_features).to(features.device)
-
-        for s in range(seq_length):
-            alpha, context = self.attention(features, h)
-            lstm_input = torch.cat((embeds[:, s], context), dim=1)
-            h, c = self.lstm_cell(lstm_input, (h, c))
-            output = self.fcn(self.drop(h))
-            preds[:, s] = output
-            alphas[:, s] = alpha
-
-        return preds, alphas
-
-    def init_hidden_state(self, encoder_out):
-        if (len(encoder_out.shape)==3):
-          mean_encoder_out = encoder_out.mean(dim=1)
-        else:
-          mean_encoder_out = encoder_out
-        h = self.init_h(mean_encoder_out)
-        c = self.init_c(mean_encoder_out)
-        return h, c
-
-
-    def generate_caption(self,features,max_len=20,vocab=None):
-        batch_size = features.size(0)
-        h, c = self.init_hidden_state(features)  # (batch_size, decoder_dim)
-
-        alphas = []
-
-        #starting input
-        word = torch.tensor(vocab.stoi['<SOS>']).view(1,-1).to("cuda")
-        embeds = self.embedding(word)
-
-        captions = []
-
-        for i in range(max_len):
-            alpha,context = self.attention(features, h)
-
-            #store the apla score
-            alphas.append(alpha.cpu().detach().numpy())
-
-            lstm_input = torch.cat((embeds[:, 0], context), dim=1)
-            h, c = self.lstm_cell(lstm_input, (h, c))
-            output = self.fcn(self.drop(h))
-            output = output.view(batch_size,-1)
-
-            #select the word with most val
-            predicted_word_idx = output.argmax(dim=1)
-
-            #save the generated word
-            captions.append(predicted_word_idx.item())
-
-            #end if <EOS detected>
-            if vocab.itos[predicted_word_idx.item()] == "<EOS>":
-                break
-
-            embeds = self.embedding(predicted_word_idx.unsqueeze(0))
-
-        return [vocab.itos[idx] for idx in captions],alphas
-
-
-
-class EncoderDecoder(nn.Module):
-    def __init__(self, embed_size, vocab_size, attention_dim, encoder_dim, decoder_dim, temporal_dim, num_layers, drop_prob=0.3):
+class VideoCaptioningModel(nn.Module):
+    def __init__(self, encoder, decoder, device):
         super().__init__()
-        #self.encoder = EncoderCNN()
-        #self.temporal_encoder = TemporalEncoder(encoder_dim * 64, temporal_dim, num_layers)
-        self.decoder = DecoderRNN(
-            embed_size=embed_size,
-            vocab_size=vocab_size,
-            attention_dim=attention_dim,
-            encoder_dim=encoder_dim,
-            decoder_dim=decoder_dim,
-            drop_prob=drop_prob
-        )
-
-    def forward(self, video_frames, captions):
-        #features = self.encoder(video_frames)  # (batch_size, num_frames, 49, 2048)
-        #temporal_features = self.temporal_encoder(features)  # (batch_size, num_frames, temporal_dim)
-
-        outputs = self.decoder(video_frames, captions)
+        self.encoder = encoder
+        self.decoder = decoder
+        self.device = device
+    
+    def forward(self, frames, input_ids, teacher_forcing_ratio=0.9):
+        batch_size = input_ids.size(0)
+        target_len = input_ids.size(1)
+        vocab_size = self.decoder.fc.out_features
+        
+        outputs = torch.zeros(batch_size, target_len, vocab_size).to(self.device)
+        encoder_outputs, hidden, cell = self.encoder(frames)
+        
+        input = input_ids[:, 0].unsqueeze(1)
+        
+        for t in range(1, target_len):
+            output, hidden, cell = self.decoder(input, encoder_outputs, hidden, cell)
+            outputs[:, t] = output
+            teacher_force = random.random() < teacher_forcing_ratio
+            top1 = output.argmax(1)
+            input = input_ids[:, t].unsqueeze(1) if teacher_force else top1.unsqueeze(1)
+        
         return outputs

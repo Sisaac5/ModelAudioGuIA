@@ -1,5 +1,7 @@
-data/clips/*
-data/vocab/vocab.json
 models/*
 vocab/vocab.json
+__pycache__/*.pyc
 __pycache__/
+models/
+temp/
+.temp/temp_video.gif
