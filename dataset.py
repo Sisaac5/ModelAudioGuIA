@@ -26,8 +26,12 @@ class VideoDataset(Dataset):
 
         frames = torch.FloatTensor(frames)  # (seq_len, 512)
 
-        timestamps = torch.linspace(0, 1, self.num_frames)
-        
+        max_frames = len(frames)
+        timestamps = self.dataframe['selected_frames'][idx][:self.max_seq_len]
+        normalized_timestamps = [ts / max_frames for ts in timestamps]
+        timestamps = torch.tensor(normalized_timestamps, dtype=torch.float)
+        #timestamps = torch.linspace(0, 1, self.num_frames)
+
         # Tokenize description
         desc = self.dataframe['description'][idx]
         tokens = self.tokenizer.encode_plus(
