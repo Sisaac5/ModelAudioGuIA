@@ -21,11 +21,11 @@ torch.backends.cudnn.logging = False
 # Hyperparameters
 INPUT_DIM = 512
 HID_DIM = 512
-N_LAYERS = 6
-NHEAD = 8
+N_LAYERS = 8
+NHEAD = 16
 BATCH_SIZE = 32
 MAX_SEQ_LEN = 20
-NUM_EPOCHS = 1
+NUM_EPOCHS = 30
 CLIP = 1
 LR = 1e-4
 TRAIN_RATIO = 0.7
@@ -33,8 +33,8 @@ VAL_RATIO = 0.15
 TEST_RATIO = 0.15
 
 # Paths
-npy_root = '/home/arthur/Documentos/Dataset/Movies'
-output_dir = 'validation_results'
+npy_root = '/home/arthur/tail/AudioGuIA/dataSet/Movies'
+output_dir = 'results'
 os.makedirs(output_dir, exist_ok=True)
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -199,3 +199,13 @@ if __name__ == "__main__":
     evaluate_and_save(model, test_dataset, test_output_path, device)
     
     print(f"Test results saved to {test_output_path}")
+    
+    # Example generation
+    sample_idx = 0
+    sample_frames, sample_text = test_dataset[sample_idx]
+    sample_true_text = tokenizer.decode(sample_text.tolist(), skip_special_tokens=True)
+    sample_pred_text = generate_description(model, sample_frames, tokenizer, device)
+    
+    print("\nExample Generation:")
+    print(f"True Description: {sample_true_text}")
+    print(f"Predicted Description: {sample_pred_text}")

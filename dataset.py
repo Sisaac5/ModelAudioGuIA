@@ -44,4 +44,4 @@ class VideoDataset(Dataset):
         input_ids = tokens['input_ids'].squeeze(0)  # (max_seq_len)
         frames= frames.squeeze(1)  # (seq_len, 512)
 
-        return frames, timestamps, input_ids
+        return frames,timestamps, input_ids

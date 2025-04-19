@@ -5,5 +5,4 @@ __pycache__/
 models/
 temp/
 .temp/temp_video.gif
-venv/
-validation_results/*
+results/*
