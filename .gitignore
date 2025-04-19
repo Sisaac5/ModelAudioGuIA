@@ -6,3 +6,5 @@ models/
 temp/
 .temp/temp_video.gif
 results/*
+validation_results/*
+venv/
