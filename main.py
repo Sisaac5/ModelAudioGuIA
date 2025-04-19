@@ -11,6 +11,7 @@ import numpy as np
 from sklearn.model_selection import train_test_split
 from model import SceneDescriptionModel
 from datetime import datetime
+from new_loss import MultiTaskLoss
 
 # Environment configurations
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
@@ -149,8 +150,9 @@ if __name__ == "__main__":
     ).to(device)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=LR)
-    criterion = nn.CrossEntropyLoss(ignore_index=tokenizer.pad_token_id)
-
+    #criterion = nn.CrossEntropyLoss(ignore_index=tokenizer.pad_token_id)
+    criterion = MultiTaskLoss(weights={'ce': 1.0, 'temp': 0.1}, label_smoothing=0.1, 
+                              ignore_index=tokenizer.pad_token_id)
     # Training loop
     best_val_loss = float('inf')
     for epoch in range(NUM_EPOCHS):
@@ -161,7 +163,7 @@ if __name__ == "__main__":
             
             optimizer.zero_grad()
             logits = model(frames, timestamps, text)
-            loss = criterion(logits.reshape(-1, logits.size(-1)), text[:, 1:].reshape(-1))
+            loss = criterion.forward(logits.reshape(-1, logits.size(-1)), text[:, 1:].reshape(-1))
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), CLIP)
             optimizer.step()
@@ -176,7 +178,7 @@ if __name__ == "__main__":
             for frames, timestamps, text in val_loader:
                 frames, timestamps, text = frames.to(device), timestamps.to(device), text.to(device)
                 logits = model(frames, timestamps, text)
-                loss = criterion(logits.reshape(-1, logits.size(-1)), text[:, 1:].reshape(-1))
+                loss = criterion.forward(logits.reshape(-1, logits.size(-1)), text[:, 1:].reshape(-1))
                 val_loss += loss.item()
         
         val_loss /= len(val_loader)
