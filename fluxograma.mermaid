@@ -1,0 +1,30 @@
+flowchart TD
+    %% Input Section
+    A[Visual Features\nShape: batch×seq×512] --> B[Linear Projection\nnn.Linear(512→hidden_dim)]
+    C[Timestamps\nShape: batch×seq] --> D[Time Encoding\nSinusoidal Embeddings]
+    H[Text Input\nBERT Token IDs] --> I[BERT Embeddings\n+ Projection to hidden_dim]
+    
+    %% Visual Processing Pipeline
+    B --> E[Add Positional Encoding]
+    D --> E
+    E --> F[Temporal Encoder\n4-layer Transformer\nnhead=8]
+    F --> G[Memory\nEncoded Visual Features]
+    
+    %% Text Generation Pipeline
+    I --> J[Add Positional Encoding]
+    J --> K[Text Decoder\n4-layer TransformerDecoder\nnhead=8]
+    G --> K
+    K --> L[Output Layer\nLinear(hidden→vocab_size)]
+    L --> M[Output Logits\nShape: batch×seq×30522]
+    
+    %% Masking
+    H --> N[Generate Masks\n1. Causal mask\n2. Padding mask]
+    N --> K
+    
+    %% Styles
+    style A fill:#ff9,stroke:#333
+    style C fill:#ff9,stroke:#333
+    style H fill:#ff9,stroke:#333
+    style M fill:#9f9,stroke:#333
+    style F fill:#bbf,stroke:#333
+    style K fill:#bbf,stroke:#333
