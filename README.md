@@ -79,16 +79,16 @@ flowchart TD
     M --> J
     
     %% ===== STYLES =====
-    style A fill:#FFD166,stroke:#333
-    style C fill:#FFD166,stroke:#333
-    style T fill:#FFD166,stroke:#333
-    style B fill:#FF9E7D,stroke:#333
-    style D fill:#FF9E7D,stroke:#333
-    style E fill:#FF9E7D,stroke:#333
-    style G fill:#06D6A0,stroke:#333
-    style J fill:#06D6A0,stroke:#333
-    style H fill:#118AB2,stroke:#333
-    style L fill:#EF476F,stroke:#333
+    style A fill:#FFD166,stroke:#333,color:#000
+    style C fill:#FFD166,stroke:#333,color:#000
+    style T fill:#FFD166,stroke:#333,color:#000
+    style B fill:#FF9E7D,stroke:#333,color:#000
+    style D fill:#FF9E7D,stroke:#333,color:#000
+    style E fill:#FF9E7D,stroke:#333,color:#000
+    style G fill:#06D6A0,stroke:#333,color:#000
+    style J fill:#06D6A0,stroke:#333,color:#000
+    style H fill:#118AB2,stroke:#333,color:#000
+    style L fill:#EF476F,stroke:#333,color:#000
 ```
 
 *Figura 1: Arquitetura da Rede*
